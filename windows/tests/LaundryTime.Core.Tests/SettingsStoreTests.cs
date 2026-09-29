@@ -13,6 +13,12 @@ public class SettingsStoreTests : IDisposable
             Place = new Place("부산", 35.1, 129.0),
             ScoringMode = ScoringMode.Combined,
             MiniWidgetVisible = true,
+            AutoLocation = false,
+            UnavailablePeriods =
+            [
+                new(new TimeOnly(7, 0), new TimeOnly(9, 0), UnavailablePeriod.Weekdays),
+                new(new TimeOnly(22, 30), new TimeOnly(6, 0), [DayOfWeek.Friday]),
+            ],
         };
 
         store.Save(settings);
@@ -26,6 +32,8 @@ public class SettingsStoreTests : IDisposable
         var path = Path.Combine(_dir, "settings.json");
         var store = new SettingsStore(path);
         Assert.Equal(ScoringMode.HumidityOnly, store.Load().ScoringMode);
+        Assert.True(store.Load().AutoLocation);
+        Assert.Empty(store.Load().UnavailablePeriods);
 
         Directory.CreateDirectory(_dir);
         File.WriteAllText(path, "{ not json");

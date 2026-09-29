@@ -7,6 +7,10 @@ namespace LaundryTime.Core;
 public sealed record AppSettings
 {
     public Place Place { get; init; } = Place.Seoul;
+    /// <summary>켜져 있으면 새로고침할 때마다 현재 위치로 지역을 갱신한다.</summary>
+    public bool AutoLocation { get; init; } = true;
+    /// <summary>빨래를 널 수 없는 시간대 (출근 시간 등).</summary>
+    public IReadOnlyList<UnavailablePeriod> UnavailablePeriods { get; init; } = [];
     public ScoringMode ScoringMode { get; init; } = ScoringMode.HumidityOnly;
     public bool NotificationsEnabled { get; init; } = true;
     /// <summary>추천 시간대 시작 몇 분 전에 알릴지.</summary>
@@ -14,6 +18,17 @@ public sealed record AppSettings
     public bool MiniWidgetVisible { get; init; }
     public double? MiniWidgetLeft { get; init; }
     public double? MiniWidgetTop { get; init; }
+
+    // 목록 속성을 값으로 비교
+    public bool Equals(AppSettings? other) =>
+        other is not null &&
+        Place == other.Place && AutoLocation == other.AutoLocation &&
+        UnavailablePeriods.SequenceEqual(other.UnavailablePeriods) &&
+        ScoringMode == other.ScoringMode && NotificationsEnabled == other.NotificationsEnabled &&
+        NotifyLeadMinutes == other.NotifyLeadMinutes && MiniWidgetVisible == other.MiniWidgetVisible &&
+        MiniWidgetLeft == other.MiniWidgetLeft && MiniWidgetTop == other.MiniWidgetTop;
+
+    public override int GetHashCode() => HashCode.Combine(Place, AutoLocation, ScoringMode, UnavailablePeriods.Count);
 }
 
 public sealed class SettingsStore(string path)

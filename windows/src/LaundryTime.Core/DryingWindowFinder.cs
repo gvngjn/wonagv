@@ -7,6 +7,8 @@ public sealed class DryingWindowFinder
     public int MinimumScore { get; init; } = 60;
     /// <summary>최소 연속 시간.</summary>
     public int MinimumHours { get; init; } = 2;
+    /// <summary>빨래를 널 수 없는 시간대. 구간이 이 시간에 시작하지 않도록 앞부분을 잘라낸다.</summary>
+    public IReadOnlyList<UnavailablePeriod> Unavailable { get; init; } = [];
 
     /// <returns>평균 점수가 높은 순(같으면 긴 순)으로 정렬된 구간.</returns>
     public IReadOnlyList<DryingWindow> FindWindows(IEnumerable<HourlyDryingScore> hours, DateTimeOffset now)
@@ -21,6 +23,13 @@ public sealed class DryingWindowFinder
 
         void Flush()
         {
+            // 널 수 없는 시간에 시작하는 부분은 잘라낸다 (그 뒤로는 계속 말라도 됨).
+            // 이미 시작된 시간은 지금 시각 기준으로 판단한다.
+            var skip = 0;
+            while (skip < run.Count && IsUnavailable(Max(run[skip].Weather.Time, now).ToOffset(run[skip].Weather.Time.Offset)))
+                skip++;
+            run.RemoveRange(0, skip);
+
             if (run.Count >= MinimumHours)
             {
                 result.Add(new DryingWindow(
@@ -50,4 +59,8 @@ public sealed class DryingWindowFinder
             .ThenByDescending(w => w.End - w.Start)
             .ToList();
     }
+
+    public bool IsUnavailable(DateTimeOffset time) => Unavailable.Any(p => p.Contains(time));
+
+    private static DateTimeOffset Max(DateTimeOffset a, DateTimeOffset b) => a > b ? a : b;
 }

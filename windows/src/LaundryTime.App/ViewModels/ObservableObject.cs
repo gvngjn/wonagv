@@ -47,3 +47,11 @@ public sealed class AsyncCommand(Func<Task> execute) : ICommand
         }
     }
 }
+
+/// <summary>매개변수를 받는 동기 커맨드.</summary>
+public sealed class RelayCommand(Action<object?> execute) : ICommand
+{
+    public event EventHandler? CanExecuteChanged { add { } remove { } }
+    public bool CanExecute(object? parameter) => true;
+    public void Execute(object? parameter) => execute(parameter);
+}

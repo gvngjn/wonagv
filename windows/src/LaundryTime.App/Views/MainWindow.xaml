@@ -22,9 +22,12 @@
                         <Border DockPanel.Dock="Right" Background="{Binding LevelBrush}" CornerRadius="10" Padding="10,3">
                             <TextBlock Text="{Binding LevelTitle}" Foreground="White" FontSize="12" FontWeight="SemiBold" />
                         </Border>
-                        <TextBlock Style="{StaticResource Caption}" FontSize="13" VerticalAlignment="Center">
-                            <Run Text="📍" /> <Run Text="{Binding LocationName, Mode=OneWay}" />
-                        </TextBlock>
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock Style="{StaticResource Caption}" FontSize="13">
+                                <Run Text="📍" /> <Run Text="{Binding LocationName, Mode=OneWay}" />
+                            </TextBlock>
+                            <TextBlock Text="{Binding LocationSourceText}" Style="{StaticResource Caption}" FontSize="11" Margin="18,1,0,0" />
+                        </StackPanel>
                     </DockPanel>
 
                     <TextBlock Text="{Binding Headline}" FontSize="22" FontWeight="Bold" TextWrapping="Wrap"
@@ -115,7 +118,7 @@
                                 <DataTemplate>
                                     <StackPanel Width="14" Margin="1,0" ToolTip="{Binding ToolTip}" Background="Transparent">
                                         <Grid Height="120">
-                                            <Border Height="{Binding BarHeight}" Background="{Binding Brush}"
+                                            <Border Height="{Binding BarHeight}" Background="{Binding Brush}" Opacity="{Binding Opacity}"
                                                     CornerRadius="3,3,0,0" VerticalAlignment="Bottom" />
                                         </Grid>
                                         <TextBlock Text="{Binding Label}" FontSize="10" Foreground="{StaticResource SubtleBrush}"
@@ -126,7 +129,59 @@
                         </ItemsControl>
                     </ScrollViewer>
                     <TextBlock Style="{StaticResource Caption}" Margin="0,6,0,0" TextWrapping="Wrap"
-                               Text="막대에 마우스를 올리면 시간별 습도를 볼 수 있어요. 연한 파랑은 비 예보예요." />
+                               Text="막대에 마우스를 올리면 시간별 습도를 볼 수 있어요. 연한 파랑은 비 예보, 흐린 막대는 빨래 못 너는 시간이에요." />
+                </StackPanel>
+            </Border>
+
+            <!-- 빨래 못 너는 시간 -->
+            <Border Style="{StaticResource Card}">
+                <StackPanel>
+                    <TextBlock Text="빨래 못 너는 시간" Style="{StaticResource SectionTitle}" />
+                    <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,-4,0,10"
+                               Text="출근 시간처럼 빨래를 널 수 없는 시간을 추가하면, 그 시간에는 널기를 추천하지 않아요. 미리 널어 둔 빨래는 계속 마르는 것으로 계산해요." />
+
+                    <TextBlock Text="등록된 시간대가 없어요." Style="{StaticResource Caption}" FontSize="13"
+                               Visibility="{Binding HasNoPeriods, Converter={StaticResource BoolToVisibility}}" />
+                    <ItemsControl ItemsSource="{Binding UnavailablePeriods}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <DockPanel Margin="0,3">
+                                    <Button DockPanel.Dock="Right" Content="삭제" Padding="10,3" Background="#D64545"
+                                            Command="{Binding DataContext.RemovePeriodCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            CommandParameter="{Binding}" />
+                                    <TextBlock Text="{Binding Description}" FontSize="14" VerticalAlignment="Center"
+                                               Foreground="{StaticResource TextBrush}" />
+                                </DockPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <Border BorderBrush="#E3E8EF" BorderThickness="0,1,0,0" Margin="0,10,0,0" Padding="0,10,0,0">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal">
+                                <ComboBox ItemsSource="{Binding TimeOptions}" SelectedItem="{Binding NewPeriodStart}" Width="80" Padding="6,4" />
+                                <TextBlock Text="~" VerticalAlignment="Center" Margin="8,0" />
+                                <ComboBox ItemsSource="{Binding TimeOptions}" SelectedItem="{Binding NewPeriodEnd}" Width="80" Padding="6,4" />
+                            </StackPanel>
+                            <ItemsControl ItemsSource="{Binding NewPeriodDays}" Margin="0,8,0,0">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <StackPanel Orientation="Horizontal" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <CheckBox Content="{Binding Name}" IsChecked="{Binding IsChecked}" Margin="0,0,10,0" />
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <DockPanel Margin="0,10,0,0">
+                                <Button DockPanel.Dock="Left" Content="추가" Command="{Binding AddPeriodCommand}" />
+                                <TextBlock Text="{Binding PeriodMessage}" Foreground="#D64545" VerticalAlignment="Center" Margin="10,0,0,0"
+                                           TextWrapping="Wrap" />
+                            </DockPanel>
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
             </Border>
 
@@ -135,7 +190,11 @@
                 <StackPanel>
                     <TextBlock Text="설정" Style="{StaticResource SectionTitle}" />
 
-                    <TextBlock Text="지역" Style="{StaticResource Caption}" Margin="0,0,0,4" />
+                    <CheckBox Content="현재 위치 자동 사용" IsChecked="{Binding AutoLocation}" />
+                    <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="20,2,0,0"
+                               Text="Windows 위치 서비스를 쓰고, 꺼져 있으면 인터넷 연결 기준 대략 위치를 써요." />
+
+                    <TextBlock Text="직접 지역 검색 (고르면 자동 위치는 꺼져요)" Style="{StaticResource Caption}" Margin="0,12,0,4" />
                     <DockPanel>
                         <Button DockPanel.Dock="Right" Content="검색" Command="{Binding SearchCommand}" Margin="6,0,0,0"
                                 IsDefault="{Binding IsKeyboardFocusWithin, ElementName=SearchBox}" />

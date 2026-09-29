@@ -31,7 +31,10 @@ public partial class App : Application
 
         var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
         http.DefaultRequestHeaders.UserAgent.ParseAdd("LaundryTime/1.0");
-        _model = new MainViewModel(new OpenMeteoClient(http), new SettingsStore(SettingsStore.DefaultPath));
+        _model = new MainViewModel(
+            new OpenMeteoClient(http),
+            new LocationService(new LocationLookupClient(http)),
+            new SettingsStore(SettingsStore.DefaultPath));
 
         _mainWindow = new MainWindow { DataContext = _model };
         _tray = new TrayIcon(ShowMainWindow, () => _model.MiniWidgetVisible = !_model.MiniWidgetVisible,
