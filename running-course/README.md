@@ -3,8 +3,13 @@
 집(출발지)에서 출발해 **다시 집으로 돌아오는** 코스를 원하는 거리(또는 시간)에 맞춰 만들어 주는 웹앱입니다.
 설치 없이 브라우저에서 동작하고, 휴대폰에서도 쓸 수 있어요.
 
+**👉 바로 열기: https://gvngjn.github.io/wonagv/** (휴대폰에서도 동작)
+
+> 휴대폰 홈 화면에 추가하면 앱처럼 쓸 수 있어요.
+> 아이폰 Safari: 공유 버튼 → "홈 화면에 추가" · 안드로이드 Chrome: ⋮ 메뉴 → "홈 화면에 추가"
+
 ## 사용법
-1. `running-course/index.html` 을 브라우저(Chrome·Edge·Safari)로 엽니다. (파일을 더블클릭해도 됩니다)
+1. 위 주소를 열거나, `running-course/index.html` 을 브라우저(Chrome·Edge·Safari)로 엽니다.
 2. **출발지** 지정 — 주소 검색, `📍 현재 위치`, 또는 지도를 클릭. 🏠 마커는 끌어서 옮길 수 있어요.
 3. **목표** — 거리(예: 5km) 또는 시간(예: 30분 × 페이스)을 정하고, 원하면 방향(북쪽/한강 쪽 등)을 고릅니다.
 4. **선호하는 길** — 항목마다 `피하기 / 상관없음 / 선호` 선택
@@ -43,6 +48,11 @@ running-course/
   course.js    코스 생성 엔진 (그래프, 선호 비용, A*, 순환 코스, GPX) — Node 에서도 동작
   test/        테스트
 ```
+
+## 배포
+`running-course/` 가 바뀌어 push 되면 [워크플로](../.github/workflows/running-course-pages.yml)가
+테스트를 돌린 뒤 `gh-pages` 브랜치에 올리고, GitHub Pages 가 그 브랜치를 사이트로 보여줍니다.
+(저장소 Settings → Pages → Source: "Deploy from a branch", Branch: `gh-pages` / `/ (root)`)
 
 ## 참고
 - 지도 데이터 © OpenStreetMap 기여자 (ODbL), 배경 지도 © CARTO, 주소 검색 Nominatim.

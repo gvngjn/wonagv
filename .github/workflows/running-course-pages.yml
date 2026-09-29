@@ -1,0 +1,49 @@
+name: 러닝 코스 웹앱 배포 (GitHub Pages)
+
+# running-course/ 를 테스트한 뒤 gh-pages 브랜치에 올린다.
+# 저장소 Settings → Pages 에서 "Deploy from a branch" · gh-pages · / (root) 로 두면
+# https://<사용자>.github.io/<저장소>/ 에서 열린다.
+on:
+  push:
+    branches:
+      - claude/lucid-franklin-hx45bq
+      - claude/serene-bell-l2x7y7
+    paths:
+      - "running-course/**"
+      - ".github/workflows/running-course-pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: 코스 생성 테스트
+        run: node --test running-course/test/*.test.js
+      - name: gh-pages 브랜치에 올리기
+        run: |
+          set -e
+          out="$RUNNER_TEMP/site"
+          mkdir -p "$out"
+          cp running-course/*.html running-course/*.css running-course/*.js \
+             running-course/*.png running-course/*.svg running-course/*.webmanifest "$out"/
+          touch "$out/.nojekyll"
+          cd "$out"
+          git init -q -b gh-pages
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "런루프 배포: ${GITHUB_SHA::7}"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" gh-pages
+      - name: 주소 안내
+        run: echo "배포 주소 https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}/" >> "$GITHUB_STEP_SUMMARY"
