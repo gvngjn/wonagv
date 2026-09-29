@@ -1,0 +1,53 @@
+# XcodeGen 프로젝트 정의 — `xcodegen generate` 로 LaundryTime.xcodeproj 를 만든다.
+name: LaundryTime
+options:
+  bundleIdPrefix: com.example
+  deploymentTarget:
+    iOS: "17.0"
+    watchOS: "10.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    DEVELOPMENT_TEAM: "" # Xcode에서 본인 팀 선택
+
+packages:
+  LaundryKit:
+    path: LaundryKit
+
+targets:
+  LaundryTime:
+    type: application
+    platform: iOS
+    sources:
+      - App/Sources
+      - App/Resources
+    dependencies:
+      - package: LaundryKit
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: 빨래 타이밍
+        CFBundleDevelopmentRegion: ko
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        NSLocationWhenInUseUsageDescription: 현재 위치의 습도와 날씨로 빨래 널기 좋은 시간을 알려드려요.
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.laundrytime
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        GENERATE_INFOPLIST_FILE: YES
+
+  # ── 추후 추가 예정 ──────────────────────────────────────────
+  # LaundryWidget:        # type: app-extension, WidgetKit
+  # LaundryWatch:         # type: application, platform: watchOS
+  # 두 타깃 모두 dependencies 에 `- package: LaundryKit` 만 추가하면
+  # 점수 계산 · 날씨 조회 · 예보 모델을 그대로 재사용할 수 있다.
+
+schemes:
+  LaundryTime:
+    build:
+      targets:
+        LaundryTime: all
