@@ -6,6 +6,7 @@
 |---|---|
 | [`windows/`](windows/) | **Windows 앱 (C# / WPF, .NET 8)** — 현재 주력 |
 | [`ios/`](ios/) | iPhone 앱 초기 버전 (SwiftUI, Mac + Xcode 필요) |
+| [`running-course/`](running-course/) | 🏃 **런루프** — 집에서 출발·도착하는 러닝/걷기 코스를 원하는 거리로 자동 생성하는 웹앱 |
 
 ## 기능
 - 3일치 시간별 날씨 조회 ([Open-Meteo](https://open-meteo.com), API 키 불필요)
