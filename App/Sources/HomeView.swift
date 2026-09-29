@@ -37,9 +37,12 @@ struct HomeView: View {
                 }
 
                 Section {
+                    Picker("계산 방식", selection: $model.scoringMode) {
+                        ForEach(ScoringMode.allCases) { Text($0.title).tag($0) }
+                    }
                     Toggle("추천 시간 30분 전에 알림", isOn: $model.notificationsEnabled)
                 } footer: {
-                    Text("날씨 데이터: Open-Meteo.com")
+                    Text("기본은 습도만으로 판단해요. 비 오는 시간은 항상 제외돼요.\n날씨 데이터: Open-Meteo.com")
                 }
             }
             .navigationTitle("빨래 타이밍")

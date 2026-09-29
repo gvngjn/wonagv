@@ -1,9 +1,27 @@
 import Foundation
 
+/// 점수 계산 방식.
+public enum ScoringMode: String, Codable, Sendable, CaseIterable, Identifiable {
+    /// 습도만으로 판단 (기본값) — 빨래가 마르느냐 안 마르느냐는 습도가 결정한다.
+    case humidityOnly
+    /// 습도 · 기온 · 햇빛 · 바람을 함께 반영
+    case combined
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .humidityOnly: "습도만"
+        case .combined: "종합 (습도·기온·햇빛·바람)"
+        }
+    }
+}
+
 /// 날씨 한 시간을 0~100점의 "빨래 건조 점수"로 환산한다.
 ///
-/// 습도가 가장 큰 비중을 차지하고, 기온 · 햇빛 · 바람이 보조 요소다.
-/// 비가 오거나 올 확률이 높으면 점수와 관계없이 차단한다.
+/// 기본(`.humidityOnly`)은 습도만으로 점수를 매긴다.
+/// `.combined`는 습도에 기온 · 햇빛 · 바람을 보조 요소로 더한다.
+/// 어느 방식이든 비가 오거나 올 확률이 높은 시간은 차단한다.
 public struct DryingScorer: Sendable {
     public struct Weights: Sendable {
         public var humidity = 0.45
@@ -13,18 +31,27 @@ public struct DryingScorer: Sendable {
         public init() {}
     }
 
+    public var mode: ScoringMode
+    /// `.combined` 모드에서만 사용
     public var weights = Weights()
     /// 이 확률(%) 이상이면 비 때문에 차단
     public var rainProbabilityLimit = 60.0
     /// 이 강수량(mm) 이상이면 비 때문에 차단
     public var precipitationLimit = 0.1
 
-    public init() {}
+    public init(mode: ScoringMode = .humidityOnly) {
+        self.mode = mode
+    }
 
     public func score(_ w: HourlyWeather) -> HourlyDryingScore {
         let blocked = isRainBlocked(w)
         guard !blocked else {
             return HourlyDryingScore(weather: w, score: 0, isRainBlocked: true)
+        }
+
+        if mode == .humidityOnly {
+            let score = Int((humidityFactor(w.humidity) * 100).rounded())
+            return HourlyDryingScore(weather: w, score: score, isRainBlocked: false)
         }
 
         var raw = weights.humidity * humidityFactor(w.humidity)

@@ -2,7 +2,26 @@ import XCTest
 @testable import LaundryKit
 
 final class DryingScorerTests: XCTestCase {
-    let scorer = DryingScorer()
+    let scorer = DryingScorer(mode: .combined)
+
+    func testDefaultModeIsHumidityOnly() {
+        let scorer = DryingScorer()
+        XCTAssertEqual(scorer.mode, .humidityOnly)
+        XCTAssertEqual(scorer.score(.sample(humidity: 40)).score, 100)
+        XCTAssertEqual(scorer.score(.sample(humidity: 62.5)).score, 50)
+        XCTAssertEqual(scorer.score(.sample(humidity: 90)).score, 0)
+    }
+
+    func testHumidityOnlyIgnoresOtherFactors() {
+        let scorer = DryingScorer()
+        let calmNight = scorer.score(.sample(humidity: 50, temperature: 5, wind: 0, cloud: 100, isDaytime: false))
+        let sunnyDay = scorer.score(.sample(humidity: 50, temperature: 30, wind: 4, cloud: 0, isDaytime: true))
+        XCTAssertEqual(calmNight.score, sunnyDay.score)
+    }
+
+    func testHumidityOnlyStillBlocksRain() {
+        XCTAssertTrue(DryingScorer().score(.sample(humidity: 40, precipitation: 1)).isRainBlocked)
+    }
 
     func testIdealWeatherScoresHigh() {
         let result = scorer.score(.sample(humidity: 35, temperature: 26, wind: 3, cloud: 0))

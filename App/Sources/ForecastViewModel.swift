@@ -23,14 +23,25 @@ final class ForecastViewModel {
         }
     }
 
+    /// 점수 계산 방식 (기본: 습도만)
+    var scoringMode: ScoringMode {
+        didSet {
+            guard scoringMode != oldValue else { return }
+            UserDefaults.standard.set(scoringMode.rawValue, forKey: "scoringMode")
+            Task { await refresh() }
+        }
+    }
+
     private let provider: WeatherProvider
-    private let advisor = DryingAdvisor()
+    private var advisor: DryingAdvisor { DryingAdvisor(scorer: DryingScorer(mode: scoringMode)) }
     private let store = ForecastStore()
     private let location = LocationProvider()
 
     init(provider: WeatherProvider = OpenMeteoProvider()) {
         self.provider = provider
         self.notificationsEnabled = UserDefaults.standard.bool(forKey: "notificationsEnabled")
+        self.scoringMode = UserDefaults.standard.string(forKey: "scoringMode")
+            .flatMap(ScoringMode.init(rawValue:)) ?? .humidityOnly
         // 네트워크 응답 전까지 마지막 예보를 먼저 보여준다
         self.forecast = store.load()
     }
