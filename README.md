@@ -1,76 +1,54 @@
 # 🧺 빨래 타이밍 (LaundryTime)
 
-현재 위치의 **습도 · 기온 · 햇빛 · 바람 · 강수 예보**를 분석해 빨래 널기 좋은 시간을 알려주는 iPhone 앱입니다.
-위젯과 Apple Watch 확장을 염두에 두고 핵심 로직을 별도 Swift 패키지로 분리했습니다.
+지역의 **습도 예보**를 확인해 빨래 널기 좋은 시간을 알려주는 **Windows 데스크톱 앱**입니다.
+
+| 폴더 | 내용 |
+|---|---|
+| [`windows/`](windows/) | **Windows 앱 (C# / WPF, .NET 8)** — 현재 주력 |
+| [`ios/`](ios/) | iPhone 앱 초기 버전 (SwiftUI, Mac + Xcode 필요) |
 
 ## 기능
-- 현재 위치 기반 3일치 시간별 날씨 조회 ([Open-Meteo](https://open-meteo.com), API 키 불필요)
-- 시간별 **건조 점수(0~100)** 계산 및 "최고 / 좋음 / 보통 / 비추천" 등급
-- 연속으로 널기 좋은 **추천 시간대** 찾기 (예: "오후 1시에 널어보세요")
-- 시간별 점수 + 습도 차트 (Swift Charts)
-- 추천 시간 30분 전 **로컬 알림**
-- 마지막 예보를 App Group 저장소에 공유 → 위젯이 바로 읽을 수 있음
+- 3일치 시간별 날씨 조회 ([Open-Meteo](https://open-meteo.com), API 키 불필요)
+- **습도만으로 판단하는 건조 점수 (기본값)** — 습도 40% 이하 100점, 85% 이상 0점
+  - 설정에서 "종합(습도·기온·햇빛·바람)" 방식으로 변경 가능
+  - 비가 오거나 강수 확률 60% 이상인 시간은 항상 제외
+- 60점 이상(습도 약 58% 이하)이 2시간 이상 이어지는 **추천 시간대** 표시
+- 48시간 **시간별 점수 차트** (마우스를 올리면 습도 표시)
+- 지역 검색 (예: "수원", "부산 해운대")
+- 추천 시간 30분 전 **Windows 알림** (창을 닫아도 트레이에서 계속 동작)
+- 항상 위에 뜨는 **바탕화면 미니 위젯** (드래그로 이동, 더블클릭으로 열기)
+- 트레이 아이콘 색이 현재 상태를 표시 (주황 최고 · 초록 좋음 · 회색 보통 · 파랑 비추천)
+- Windows 시작 시 자동 실행 옵션
 
-## 프로젝트 구조
+## 설치 (빌드된 exe 받기)
+1. GitHub 저장소 → **Actions** 탭 → "Windows 앱 빌드" 최신 실행 선택
+2. 아래 **Artifacts** 에서 `LaundryTime-win-x64` 다운로드 → 압축 해제
+3. `LaundryTime.exe` 실행 (.NET 설치 불필요)
+
+> 서명되지 않은 exe라 처음 실행 시 SmartScreen 경고가 뜰 수 있어요 → "추가 정보" → "실행".
+
+## 직접 빌드
+[.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) 설치 후:
+```powershell
+cd windows
+dotnet run --project src/LaundryTime.App          # 바로 실행
+dotnet test                                       # 테스트
+dotnet publish src/LaundryTime.App -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -o publish
 ```
-LaundryKit/                 ← 앱 · 위젯 · 워치 공용 Swift 패키지 (UI 의존성 없음)
-  Models/                   HourlyWeather, DryingForecast, DryingWindow, DryingLevel
-  Scoring/                  DryingScorer(점수), DryingWindowFinder(구간), DryingAdvisor(문구)
-  Weather/                  WeatherProvider 프로토콜, OpenMeteoProvider
-  Storage/                  ForecastStore (App Group UserDefaults)
-  Tests/                    단위 테스트
-App/Sources/                ← iPhone 앱 (SwiftUI, iOS 17+)
-  HomeView, ForecastViewModel, LocationProvider, NotificationScheduler
-project.yml                 ← XcodeGen 프로젝트 정의
+Visual Studio 2022에서는 `windows/LaundryTime.sln`을 열면 됩니다.
+
+## 구조
 ```
-
-## 건조 점수 계산 방식
-**기본값은 습도만으로 판단**합니다. 빨래가 마르느냐 안 마르느냐는 결국 습도가 결정하기 때문입니다.
-
-- 습도 40% 이하 = 100점, 85% 이상 = 0점, 그 사이는 비례
-- 강수량 0.1mm 이상 또는 강수 확률 60% 이상인 시간은 **항상 제외**
-- 60점 이상(습도 약 58% 이하)이 2시간 이상 이어지는 구간을 "추천 시간대"로 표시
-
-앱 설정에서 **종합 모드**로 바꾸면 아래 가중치로 기온 · 햇빛 · 바람도 반영합니다.
-
-| 요소 | 가중치 | 만점 기준 |
-|---|---|---|
-| 습도 | 45% | 40% 이하 만점, 85% 이상 0점 |
-| 기온 | 20% | 25°C 이상 만점, 5°C 이하 0점 |
-| 햇빛 | 20% | 낮 + 맑음 만점, 밤 0점 |
-| 바람 | 15% | 2~7 m/s 만점, 무풍·강풍 감점 |
-
-- 종합 모드에서는 강수 확률 20%부터 점진적으로 감점
-
-가중치와 기준값은 `DryingScorer`에서 조정할 수 있습니다.
-
-## 실행 방법 (macOS + Xcode 15 이상)
-```bash
-brew install xcodegen
-xcodegen generate
-open LaundryTime.xcodeproj
+windows/
+  src/LaundryTime.Core/     ← UI 없는 핵심 로직 (Linux/macOS에서도 빌드·테스트 가능)
+    DryingScorer            점수 계산 (습도만 / 종합)
+    DryingWindowFinder      연속 추천 시간대 찾기
+    DryingAdvisor           "오후 2시에 널어보세요" 문구
+    OpenMeteoClient         날씨 · 지역 검색 API
+    AppSettings             설정 저장 (%APPDATA%\LaundryTime\settings.json)
+  src/LaundryTime.App/      ← WPF 앱
+    Views/                  메인 창, 미니 위젯
+    ViewModels/             MainViewModel
+    Services/               트레이 아이콘 · 알림, 자동 실행
+  tests/LaundryTime.Core.Tests/   xUnit 테스트
 ```
-1. `LaundryTime` 타깃 → Signing & Capabilities 에서 본인 Team 선택
-2. 필요하면 번들 ID(`com.example.laundrytime`)를 본인 것으로 변경
-3. 실행 (시뮬레이터에서는 Features > Location 으로 위치 지정)
-
-공용 로직 테스트만 돌리려면: `cd LaundryKit && swift test`
-
-## 다음 단계: 위젯 & Apple Watch
-### 위젯 (WidgetKit)
-1. `project.yml`에 `app-extension` 타깃을 추가하고 `LaundryKit` 의존성 연결
-2. 앱과 위젯 **양쪽에 App Groups capability** 추가 → `group.com.example.laundrytime`
-   (ID를 바꾸면 `ForecastStore.appGroupID`도 같이 변경. 유료 개발자 계정 필요)
-3. `TimelineProvider`에서 `ForecastStore().load()`로 예보를 읽고,
-   `forecast.hours` 각 시간을 타임라인 엔트리로 만들면 네트워크 없이도 시간별로 갱신됨
-4. 앱은 이미 새 예보를 저장할 때 `WidgetCenter.shared.reloadAllTimelines()`를 호출함
-
-### Apple Watch
-- 워치 앱 타깃에 `LaundryKit`을 연결하면 `OpenMeteoProvider` + `DryingAdvisor`로 **워치 단독 조회** 가능
-- 또는 `WatchConnectivity`로 iPhone의 `DryingForecast`(Codable)를 그대로 전송
-- 컴플리케이션은 위젯과 같은 WidgetKit 코드를 `accessoryCircular` / `accessoryRectangular` 패밀리로 재사용
-
-### 기타 아이디어
-- WeatherKit으로 교체: `WeatherProvider`를 구현하는 `WeatherKitProvider` 추가
-- 실내 건조 모드, 이불/두꺼운 옷 등 빨래 종류별 필요 시간 설정
-- 백그라운드 새로고침(`BGAppRefreshTask`)으로 알림 정확도 향상

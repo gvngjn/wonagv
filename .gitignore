@@ -10,4 +10,11 @@ Package.resolved
 *.ipa
 *.dSYM.zip
 .DS_Store
-App/Info.plist
+ios/App/Info.plist
+
+# .NET
+bin/
+obj/
+*.user
+.vs/
+TestResults/

@@ -1,0 +1,43 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{5DA9DC98-80E6-4738-A7EA-F697B0FE8676}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LaundryTime.Core", "src\LaundryTime.Core\LaundryTime.Core.csproj", "{434EB7D6-AFE3-4CBF-811A-92145CFCB979}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{B23645DD-282F-4BA4-823F-B7E3DD9C1B9F}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LaundryTime.Core.Tests", "tests\LaundryTime.Core.Tests\LaundryTime.Core.Tests.csproj", "{03B84DAB-63FE-484C-B408-07DB9A7A74B1}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LaundryTime.App", "src\LaundryTime.App\LaundryTime.App.csproj", "{D68C4197-CD3E-4EBF-8A04-D4B5AC680321}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{D68C4197-CD3E-4EBF-8A04-D4B5AC680321}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D68C4197-CD3E-4EBF-8A04-D4B5AC680321}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D68C4197-CD3E-4EBF-8A04-D4B5AC680321}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D68C4197-CD3E-4EBF-8A04-D4B5AC680321}.Release|Any CPU.Build.0 = Release|Any CPU
+		{434EB7D6-AFE3-4CBF-811A-92145CFCB979}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{434EB7D6-AFE3-4CBF-811A-92145CFCB979}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{434EB7D6-AFE3-4CBF-811A-92145CFCB979}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{434EB7D6-AFE3-4CBF-811A-92145CFCB979}.Release|Any CPU.Build.0 = Release|Any CPU
+		{03B84DAB-63FE-484C-B408-07DB9A7A74B1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{03B84DAB-63FE-484C-B408-07DB9A7A74B1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{03B84DAB-63FE-484C-B408-07DB9A7A74B1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{03B84DAB-63FE-484C-B408-07DB9A7A74B1}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{D68C4197-CD3E-4EBF-8A04-D4B5AC680321} = {5DA9DC98-80E6-4738-A7EA-F697B0FE8676}
+		{434EB7D6-AFE3-4CBF-811A-92145CFCB979} = {5DA9DC98-80E6-4738-A7EA-F697B0FE8676}
+		{03B84DAB-63FE-484C-B408-07DB9A7A74B1} = {B23645DD-282F-4BA4-823F-B7E3DD9C1B9F}
+	EndGlobalSection
+EndGlobal
