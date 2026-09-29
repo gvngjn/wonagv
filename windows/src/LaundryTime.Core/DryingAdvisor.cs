@@ -23,22 +23,40 @@ public sealed class DryingAdvisor
         return $"{TimeText(window.Start, now)}에 널어보세요";
     }
 
-    /// <summary>"오후 2시", "내일 오전 10시" 형태. <paramref name="date"/>의 오프셋 기준으로 표시한다.</summary>
-    public static string TimeText(DateTimeOffset date, DateTimeOffset now)
-    {
-        var local = date;
-        var today = now.ToOffset(date.Offset).Date;
-        var ampm = local.Hour < 12 ? "오전" : "오후";
-        var hour12 = local.Hour % 12 == 0 ? 12 : local.Hour % 12;
-        var time = $"{ampm} {hour12}시";
+    /// <summary>
+    /// "오늘 오후 2시", "내일(수) 오전 10시", "10월 1일(목) 오전 9시" 형태.
+    /// <paramref name="date"/>의 오프셋(지역 현지 시각) 기준으로 표시한다.
+    /// </summary>
+    public static string TimeText(DateTimeOffset date, DateTimeOffset now) =>
+        $"{DayText(date, now)} {ClockText(date)}";
 
-        var days = (local.Date - today).Days;
-        return days switch
+    /// <summary>시간 범위. 같은 날이면 날짜는 한 번만: "내일(수) 오전 10시 ~ 오후 3시".</summary>
+    public static string RangeText(DateTimeOffset start, DateTimeOffset end, DateTimeOffset now)
+    {
+        var endLocal = end.ToOffset(start.Offset);
+        return endLocal.Date == start.Date
+            ? $"{TimeText(start, now)} ~ {ClockText(endLocal)}"
+            : $"{TimeText(start, now)} ~ {TimeText(endLocal, now)}";
+    }
+
+    /// <summary>"오늘", "내일(수)", "10월 1일(목)".</summary>
+    public static string DayText(DateTimeOffset date, DateTimeOffset now)
+    {
+        var today = now.ToOffset(date.Offset).Date;
+        var weekday = UnavailablePeriod.DayName(date.DayOfWeek);
+        return (date.Date - today).Days switch
         {
-            0 => time,
-            1 => $"내일 {time}",
-            2 => $"모레 {time}",
-            _ => $"{days}일 뒤 {time}",
+            0 => "오늘",
+            1 => $"내일({weekday})",
+            _ => $"{date.Month}월 {date.Day}일({weekday})",
         };
+    }
+
+    /// <summary>"오전 9시", "오후 12시".</summary>
+    public static string ClockText(DateTimeOffset date)
+    {
+        var ampm = date.Hour < 12 ? "오전" : "오후";
+        var hour12 = date.Hour % 12 == 0 ? 12 : date.Hour % 12;
+        return date.Minute == 0 ? $"{ampm} {hour12}시" : $"{ampm} {hour12}시 {date.Minute}분";
     }
 }

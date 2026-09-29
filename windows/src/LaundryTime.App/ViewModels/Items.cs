@@ -7,7 +7,7 @@ namespace LaundryTime.App.ViewModels;
 public sealed record WindowItem(string TimeRange, string Detail, string LevelTitle, Brush LevelBrush)
 {
     public static WindowItem From(DryingWindow w, DateTimeOffset now) => new(
-        $"{DryingAdvisor.TimeText(w.Start, now)} ~ {DryingAdvisor.TimeText(w.End, now)}",
+        DryingAdvisor.RangeText(w.Start, w.End, now),
         $"{w.Hours}시간 · 평균 습도 {w.AverageHumidity:0}%",
         w.Level.Title(),
         LevelStyle.BrushOf(w.Level));
@@ -25,7 +25,7 @@ public sealed record HourBar(double BarHeight, Brush Brush, string Label, string
     {
         var t = h.Weather.Time;
         // 3시간마다 라벨, 자정에는 날짜 표시
-        var label = t.Hour == 0 ? $"{t:M/d}" : t.Hour % 3 == 0 ? $"{t.Hour}" : "";
+        var label = t.Hour == 0 ? $"{t.Month}/{t.Day}({UnavailablePeriod.DayName(t.DayOfWeek)})" : t.Hour % 3 == 0 ? $"{t.Hour}" : "";
         var tip = $"{DryingAdvisor.TimeText(t, now)}\n습도 {h.Weather.Humidity:0}% · 기온 {h.Weather.Temperature:0}°C\n" +
                   (h.IsRainBlocked ? "비 예보 — 널지 마세요" : $"건조 점수 {h.Score} ({h.Level.Title()})") +
                   (isUnavailable ? "\n빨래 못 너는 시간" : "");
