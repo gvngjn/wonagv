@@ -49,3 +49,20 @@ public class AdvisorTests
     public void ClockTextShowsMinutes() =>
         Assert.Equal("오전 7시 30분", DryingAdvisor.ClockText(Base.AddMinutes(-90)));
 }
+
+public class ShortHeadlineTests
+{
+    [Fact]
+    public void ShortHeadlineCoversAllStates()
+    {
+        var b = Samples.Base;
+        Assert.Equal("실내 건조", DryingAdvisor.ShortHeadline(new DryingForecast("서울", b, [], []), b));
+
+        var weather = Enumerable.Range(0, 8)
+            .Select(i => Samples.Weather(b.AddHours(i), humidity: i is >= 3 and <= 5 ? 40 : 80))
+            .ToList();
+        var forecast = new DryingAdvisor().CreateForecast(weather, "서울", b);
+        Assert.Equal("오늘 오후 12시", DryingAdvisor.ShortHeadline(forecast, b));
+        Assert.Equal("지금 널기 OK", DryingAdvisor.ShortHeadline(forecast, b.AddHours(4)));
+    }
+}

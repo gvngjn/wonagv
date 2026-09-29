@@ -213,6 +213,8 @@
 
                     <CheckBox Content="추천 시간 30분 전에 알림" IsChecked="{Binding NotificationsEnabled}" Margin="0,14,0,0" />
                     <CheckBox Content="바탕화면 미니 위젯 표시" IsChecked="{Binding MiniWidgetVisible}" Margin="0,8,0,0" />
+                    <CheckBox Content="미니 위젯 최소화 모드 (습도와 추천 시간만)" IsChecked="{Binding MiniWidgetCompact}" Margin="20,6,0,0"
+                              IsEnabled="{Binding MiniWidgetVisible}" />
                     <CheckBox Content="Windows 시작 시 자동 실행" IsChecked="{Binding RunAtStartup}" Margin="0,8,0,0" />
 
                     <TextBlock Style="{StaticResource Caption}" Margin="0,14,0,0" TextWrapping="Wrap"

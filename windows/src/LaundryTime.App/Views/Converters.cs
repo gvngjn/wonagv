@@ -22,6 +22,18 @@ public sealed class NotEmptyToVisibility : IValueConverter
         throw new NotSupportedException();
 }
 
+/// <summary>true면 Collapsed, false면 Visible.</summary>
+public sealed class InverseBoolToVisibility : IValueConverter
+{
+    public static readonly InverseBoolToVisibility Instance = new();
+
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        value is true ? Visibility.Collapsed : Visibility.Visible;
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        throw new NotSupportedException();
+}
+
 /// <summary>로딩 중이면 " · 불러오는 중…" 문구를 붙인다.</summary>
 public sealed class LoadingSuffix : IValueConverter
 {

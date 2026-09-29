@@ -24,6 +24,19 @@ public sealed class DryingAdvisor
     }
 
     /// <summary>
+    /// 최소화 위젯용 아주 짧은 문구: "지금 널기 OK", "오늘 오후 2시", "내일(수) 오전 10시", "실내 건조".
+    /// </summary>
+    public static string ShortHeadline(DryingForecast forecast, DateTimeOffset now)
+    {
+        var window = forecast.NextWindow(now);
+        if (window is null)
+            return "실내 건조";
+        if (window.Start <= now)
+            return "지금 널기 OK";
+        return TimeText(window.Start, now);
+    }
+
+    /// <summary>
     /// "오늘 오후 2시", "내일(수) 오전 10시", "10월 1일(목) 오전 9시" 형태.
     /// <paramref name="date"/>의 오프셋(지역 현지 시각) 기준으로 표시한다.
     /// </summary>

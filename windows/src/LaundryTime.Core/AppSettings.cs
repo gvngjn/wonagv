@@ -16,6 +16,8 @@ public sealed record AppSettings
     /// <summary>추천 시간대 시작 몇 분 전에 알릴지.</summary>
     public int NotifyLeadMinutes { get; init; } = 30;
     public bool MiniWidgetVisible { get; init; }
+    /// <summary>미니 위젯 최소화 모드 (습도와 짧은 추천만 표시).</summary>
+    public bool MiniWidgetCompact { get; init; }
     public double? MiniWidgetLeft { get; init; }
     public double? MiniWidgetTop { get; init; }
 
@@ -26,6 +28,7 @@ public sealed record AppSettings
         UnavailablePeriods.SequenceEqual(other.UnavailablePeriods) &&
         ScoringMode == other.ScoringMode && NotificationsEnabled == other.NotificationsEnabled &&
         NotifyLeadMinutes == other.NotifyLeadMinutes && MiniWidgetVisible == other.MiniWidgetVisible &&
+        MiniWidgetCompact == other.MiniWidgetCompact &&
         MiniWidgetLeft == other.MiniWidgetLeft && MiniWidgetTop == other.MiniWidgetTop;
 
     public override int GetHashCode() => HashCode.Combine(Place, AutoLocation, ScoringMode, UnavailablePeriods.Count);

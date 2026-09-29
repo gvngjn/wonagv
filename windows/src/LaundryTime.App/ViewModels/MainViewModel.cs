@@ -72,6 +72,10 @@ public sealed class MainViewModel : ObservableObject
     /// <summary>"자동 · Windows 위치" 처럼 위치를 어떻게 정했는지.</summary>
     public string LocationSourceText { get => _locationSourceText; private set => Set(ref _locationSourceText, value); }
 
+    private string _shortHeadline = "";
+    /// <summary>최소화 위젯용 짧은 문구.</summary>
+    public string ShortHeadline { get => _shortHeadline; private set => Set(ref _shortHeadline, value); }
+
     private string _humidityText = "–";
     public string HumidityText { get => _humidityText; private set => Set(ref _humidityText, value); }
 
@@ -152,6 +156,12 @@ public sealed class MainViewModel : ObservableObject
             OnPropertyChanged();
             MiniWidgetVisibilityChanged?.Invoke(value);
         }
+    }
+
+    public bool MiniWidgetCompact
+    {
+        get => _settings.MiniWidgetCompact;
+        set { Save(_settings with { MiniWidgetCompact = value }); OnPropertyChanged(); }
     }
 
     public bool RunAtStartup
@@ -354,6 +364,7 @@ public sealed class MainViewModel : ObservableObject
         var now = DateTimeOffset.Now;
 
         Headline = DryingAdvisor.Headline(forecast, now);
+        ShortHeadline = DryingAdvisor.ShortHeadline(forecast, now);
         if (forecast.Current(now) is { } current)
         {
             var w = current.Weather;
