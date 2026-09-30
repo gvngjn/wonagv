@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>런루프 · 러닝 코스 만들기</title>
+  <meta name="description" content="집에서 출발해 집으로 돌아오는 러닝·걷기 코스를 원하는 거리만큼 자동으로 만들어 줍니다.">
+  <meta name="theme-color" content="#ff5a36">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="런루프">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon-180.png">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="panel" id="panel">
+      <header class="brand">
+        <h1>🏃 런루프</h1>
+        <p>집에서 출발해 집으로 돌아오는 코스를 원하는 거리만큼 만들어 드려요.</p>
+      </header>
+
+      <section class="card">
+        <h2>1. 출발지 (우리 집)</h2>
+        <form id="searchForm" class="row">
+          <input id="searchInput" type="search" placeholder="주소나 장소 검색 (예: 서울 마포구 망원동)" autocomplete="off">
+          <button type="submit" class="btn">검색</button>
+        </form>
+        <ul id="searchResults" class="search-results" hidden></ul>
+        <div class="row">
+          <button type="button" class="btn ghost" id="locateBtn">📍 현재 위치</button>
+          <span class="hint">또는 지도를 클릭·마커를 끌어서 지정</span>
+        </div>
+        <p id="homeLabel" class="home-label">아직 출발지가 없어요.</p>
+      </section>
+
+      <section class="card">
+        <h2>2. 목표</h2>
+        <div class="seg" role="radiogroup" id="targetMode">
+          <button type="button" data-v="distance" class="on">거리</button>
+          <button type="button" data-v="time">시간</button>
+        </div>
+        <div class="row target-row">
+          <input id="targetInput" type="number" min="0.5" max="42.2" step="0.1" value="5" inputmode="decimal">
+          <span id="targetUnit">km</span>
+          <div class="chips" id="quickChips"></div>
+        </div>
+        <div class="row">
+          <label for="activity">활동</label>
+          <select id="activity">
+            <option value="run">달리기</option>
+            <option value="walk">걷기</option>
+          </select>
+          <label for="pace">페이스</label>
+          <input id="pace" type="text" value="6:00" class="pace" pattern="\d{1,2}:\d{2}">
+          <span class="hint">/km</span>
+        </div>
+        <div class="row">
+          <label for="direction">방향</label>
+          <select id="direction">
+            <option value="">자동 (여러 방향 비교)</option>
+            <option value="0">북쪽</option>
+            <option value="45">북동쪽</option>
+            <option value="90">동쪽</option>
+            <option value="135">남동쪽</option>
+            <option value="180">남쪽</option>
+            <option value="225">남서쪽</option>
+            <option value="270">서쪽</option>
+            <option value="315">북서쪽</option>
+          </select>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>3. 선호하는 길</h2>
+        <div id="prefs" class="prefs"></div>
+      </section>
+
+      <button type="button" class="btn primary big" id="generateBtn">코스 만들기</button>
+      <div id="status" class="status" hidden>
+        <div class="bar"><div id="progress"></div></div>
+        <span id="statusText"></span>
+      </div>
+
+      <section id="results" class="results"></section>
+
+      <footer class="foot">
+        지도 데이터 © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> 기여자 ·
+        길 정보 <a href="https://overpass-api.de" target="_blank" rel="noopener">Overpass API</a> ·
+        주소 검색 <a href="https://nominatim.org" target="_blank" rel="noopener">Nominatim</a>
+      </footer>
+    </aside>
+    <main id="map" class="map"></main>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+  <script src="course.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
