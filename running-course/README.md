@@ -55,7 +55,7 @@ running-course/
 (저장소 Settings → Pages → Source: "Deploy from a branch", Branch: `gh-pages` / `/ (root)`)
 
 ## 참고
-- 지도 데이터 © OpenStreetMap 기여자 (ODbL), 배경 지도 © CARTO, 주소 검색 Nominatim.
+- 지도 데이터 © OpenStreetMap 기여자 (ODbL), 배경 지도 OpenStreetMap · 위성 사진 © Esri, 주소 검색 Nominatim.
 - 무료 공용 서버를 쓰므로 너무 자주(수 초에 한 번씩) 새 동네를 불러오지 마세요.
   하프(21km) 이상은 데이터 양이 많아 처음 받는 데 시간이 더 걸립니다.
 - OSM 데이터 품질에 따라 공원·가로등 정보가 빠진 곳이 있을 수 있어요. 실제 길 상황(공사·통제)은 현장에서 확인하세요.

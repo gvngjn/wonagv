@@ -49,11 +49,19 @@
   // 지도
   // ---------------------------------------------------------------------------
   const map = L.map('map', { zoomControl: true }).setView(state.home ? [state.home.lat, state.home.lon] : [37.5665, 126.978], state.home ? 15 : 12);
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-    maxZoom: 19,
-    subdomains: 'abcd',
-    attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> · © <a href="https://carto.com/attributions">CARTO</a>',
-  }).addTo(map);
+  // 배경 지도: API 키가 필요 없는 OpenStreetMap 기본 지도 + 위성 사진(Esri) 선택
+  const baseMaps = {
+    '기본 지도': L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> 기여자',
+    }),
+    '위성 사진': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+      maxZoom: 19,
+      attribution: '© Esri, Maxar, Earthstar Geographics',
+    }),
+  };
+  baseMaps['기본 지도'].addTo(map);
+  L.control.layers(baseMaps, null, { position: 'topright' }).addTo(map);
 
   const courseLayer = L.layerGroup().addTo(map);
   let homeMarker = null;
