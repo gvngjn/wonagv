@@ -209,3 +209,30 @@ def grid_beats(bpm: float, first_beat: float, duration: float) -> list[float]:
     step = 60.0 / bpm
     n = int((duration - first_beat) / step) + 1
     return [round(first_beat + i * step, 4) for i in range(max(0, n))]
+
+
+def waveform_peaks(y: np.ndarray, buckets: int = 1200) -> np.ndarray:
+    """화면에 그릴 파형: 구간별 최대 진폭 (0~1)."""
+    if len(y) == 0 or buckets <= 0:
+        return np.zeros(0, dtype=np.float32)
+    buckets = min(buckets, len(y))
+    usable = len(y) // buckets * buckets
+    peaks = np.abs(y[:usable]).reshape(buckets, -1).max(axis=1)
+    top = float(np.percentile(peaks, 99)) or float(peaks.max()) or 1.0
+    return np.clip(peaks / top, 0, 1).astype(np.float32)
+
+
+def analyze_file_with_waveform(path: str, bpm_hint: float = 0.0) -> tuple[BeatResult, np.ndarray]:
+    """한 번 디코딩해서 비트 분석과 파형을 함께 만든다."""
+    from .ffmpeg import decode_audio
+
+    y = decode_audio(path, SAMPLE_RATE)
+    if len(y) == 0:
+        raise ValueError("음악 파일에서 소리를 찾지 못했어요.")
+    return analyze_samples(y, SAMPLE_RATE, bpm_hint), waveform_peaks(y)
+
+
+def load_waveform(path: str, buckets: int = 1200) -> np.ndarray:
+    from .ffmpeg import decode_audio
+
+    return waveform_peaks(decode_audio(path, 8000), buckets)

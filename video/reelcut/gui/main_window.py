@@ -11,7 +11,7 @@ from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
     QComboBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QMainWindow,
-    QMessageBox, QProgressBar, QPushButton, QSlider, QSplitter, QStyle, QTabWidget,
+    QMessageBox, QProgressBar, QPushButton, QScrollArea, QSlider, QSplitter, QStyle, QTabWidget,
     QVBoxLayout, QWidget,
 )
 
@@ -121,7 +121,11 @@ class MainWindow(QMainWindow):
 
         self.tabs = QTabWidget()
         self.tabs.addTab(self.clips, "🎬 클립 이어붙이기")
-        self.tabs.addTab(self.music, "🎵 음악·비트")
+        music_scroll = QScrollArea()
+        music_scroll.setWidgetResizable(True)
+        music_scroll.setFrameShape(QScrollArea.NoFrame)
+        music_scroll.setWidget(self.music)
+        self.tabs.addTab(music_scroll, "🎵 음악·비트")
         self.tabs.addTab(self.pips, "🖼 화면 속 화면")
         self.tabs.addTab(self.subs, "💬 자막")
 
@@ -129,6 +133,8 @@ class MainWindow(QMainWindow):
             panel.changed.connect(self._on_changed)
         self.clips.preview_requested.connect(lambda p, s: self.preview.load(p, s))
         self.music.analyze_requested.connect(self.analyze_music)
+        self.music.music_chosen.connect(self._set_music)
+        self.music.download_requested.connect(self.download_music)
         self.subs.generate_requested.connect(self.generate_subtitles)
 
         right = QWidget()
@@ -264,11 +270,15 @@ class MainWindow(QMainWindow):
     def _busy(self, busy: bool) -> None:
         for w in (self.preview_btn, self.export_btn, self.music.analyze_btn, self.subs.gen_btn):
             w.setEnabled(not busy)
+        self.music.set_downloading(busy)
         if not busy:
             self.music.reload()
         self.cancel_btn.setEnabled(busy)
 
     def _start(self, fn, on_done, label: str) -> None:
+        if self.task and self.task.isRunning():
+            # 앞 작업의 완료 알림 안에서 바로 다음 작업을 시작하는 경우 스레드가 끝나길 잠깐 기다린다
+            self.task.wait(1000)
         if self.task and self.task.isRunning():
             QMessageBox.information(self, "ReelCut", "다른 작업이 진행 중이에요.")
             return
@@ -303,18 +313,55 @@ class MainWindow(QMainWindow):
         path = self.project.music.path
         if not path:
             return
-        from ..beats import analyze_file
+        from ..beats import analyze_file_with_waveform
 
         def work(t: TaskThread):
             t.report(0.2, "음악의 템포와 비트를 찾는 중…")
-            return analyze_file(path)
+            return analyze_file_with_waveform(path)
 
         def done(result) -> None:
-            self.music.set_beats(result.bpm, result.beats)
+            beats, peaks = result
+            if self.project.music.path != path:
+                return
+            self.music.set_waveform(peaks)
+            self.music.set_beats(beats.bpm, beats.beats)
             self.progress.setValue(1000)
-            self.status.setText(f"비트 분석 완료: 약 {result.bpm:.1f} BPM, 비트 {len(result.beats)}개")
+            self.status.setText(f"비트 분석 완료: 약 {beats.bpm:.1f} BPM, 비트 {len(beats.beats)}개 · "
+                                "파형에서 클릭·드래그로 시작 위치를 고르세요.")
 
         self._start(work, done, "음악 분석 중…")
+
+    def load_music_waveform(self) -> None:
+        """프로젝트를 열었을 때 파형만 다시 그리기 (비트는 저장돼 있음)."""
+        path = self.project.music.path
+        if not path or not Path(path).exists():
+            return
+        from ..beats import load_waveform
+
+        def done(peaks) -> None:
+            if self.project.music.path == path:
+                self.music.set_waveform(peaks)
+                self.progress.setValue(1000)
+                self.status.setText("프로젝트를 열었어요.")
+
+        self._start(lambda t: load_waveform(path), done, "음악 파형 불러오는 중…")
+
+    def download_music(self, url: str) -> None:
+        from ..download import download_audio, is_url
+
+        if not is_url(url):
+            QMessageBox.information(self, "음악 받기", "https:// 로 시작하는 링크를 붙여넣어 주세요.")
+            return
+
+        def work(t: TaskThread):
+            return download_audio(url, on_progress=t.report, should_stop=lambda: t.cancelled)
+
+        def done(result) -> None:
+            self.music.url_edit.clear()
+            self.status.setText(f"받기 완료: {Path(result.path).name}")
+            self._set_music(result.path)
+
+        self._start(work, done, "음악 받는 중…")
 
     def generate_subtitles(self) -> None:
         from .. import subtitles as subs
@@ -367,6 +414,7 @@ class MainWindow(QMainWindow):
         if bs.enabled and not self.project.music.beats:
             QMessageBox.information(self, "ReelCut", "비트 맞춤을 쓰려면 음악 탭에서 '비트 분석'을 먼저 해 주세요.")
             return
+        self.music.stop_preview()
         if preview:
             out = self.preview_file
             self.preview.unload()   # 재생 중인 파일은 덮어쓸 수 없으므로
@@ -428,9 +476,11 @@ class MainWindow(QMainWindow):
 
     def new_project(self) -> None:
         if self._confirm_discard():
+            self.music.stop_preview()
             self.project = Project()
             self.project_path = None
             self.dirty = False
+            self.music.set_waveform([])
             self._reload_all()
 
     def open_project(self) -> None:
@@ -446,7 +496,10 @@ class MainWindow(QMainWindow):
             return
         self.project_path = path
         self.dirty = False
+        self.music.stop_preview()
+        self.music.set_waveform([])
         self._reload_all()
+        self.load_music_waveform()
         missing = [c.path for c in self.project.clips if not Path(c.path).exists()]
         if missing:
             QMessageBox.warning(self, "ReelCut", "찾을 수 없는 파일:\n" + "\n".join(missing))
@@ -492,8 +545,13 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.warning(self, "음악", str(e))
             return
+        if not info.has_audio:
+            QMessageBox.warning(self, "음악", "소리가 없는 파일이에요.")
+            return
+        self.music.stop_preview()
         m = self.project.music
         m.path, m.duration, m.start, m.bpm, m.beats, m.beat_offset = path, info.duration, 0.0, 0.0, [], 0.0
+        self.music.set_waveform([])
         self.music.reload()
         self._on_changed()
         self.analyze_music()
@@ -506,4 +564,5 @@ class MainWindow(QMainWindow):
             self.task.cancel()
             self.task.wait(3000)
         self.preview.unload()
+        self.music.stop_preview()
         e.accept()

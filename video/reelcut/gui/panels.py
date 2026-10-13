@@ -7,7 +7,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFontComboBox,
-    QFormLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QListWidget, QListWidgetItem,
+    QFormLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QListWidgetItem,
     QMessageBox, QPushButton, QSizePolicy, QSlider, QSpinBox, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QWidget,
 )
@@ -16,6 +16,7 @@ from .. import subtitles as subs
 from ..ffmpeg import probe
 from ..project import Clip, PipOverlay, Project, SubtitleEntry
 from ..render import is_image
+from .music_gauge import MusicGauge, MusicPreviewPlayer
 
 VIDEO_FILTER = "영상·사진 (*.mp4 *.mov *.mkv *.avi *.webm *.m4v *.wmv *.jpg *.jpeg *.png *.bmp *.webp);;모든 파일 (*)"
 AUDIO_FILTER = "음악 (*.mp3 *.wav *.m4a *.aac *.flac *.ogg *.opus *.wma *.mp4);;모든 파일 (*)"
@@ -308,6 +309,8 @@ class BeatStrip(QWidget):
 class MusicPanel(QWidget):
     changed = Signal()
     analyze_requested = Signal()
+    music_chosen = Signal(str)        # 파일 경로
+    download_requested = Signal(str)  # 유튜브 등 링크
 
     def __init__(self, project: Project) -> None:
         super().__init__()
@@ -316,19 +319,40 @@ class MusicPanel(QWidget):
 
         # 음악 등록
         music_box = QGroupBox("음악 등록")
+        self.url_edit = QLineEdit()
+        self.url_edit.setPlaceholderText("유튜브 링크 붙여넣기 (예: https://youtu.be/...)")
+        self.url_edit.setClearButtonEnabled(True)
+        self.url_edit.returnPressed.connect(self._request_download)
+        self.download_btn = QPushButton("⬇ mp3로 받기")
+        self.download_btn.clicked.connect(self._request_download)
+        url_note = QLabel("받은 mp3는 '음악\\ReelCut' 폴더에 저장돼요. 저작권이 있는 노래는 업로드 시 "
+                          "차단·수익 제한될 수 있으니 직접 만든 곡이나 무료 음원을 쓰세요.")
+        url_note.setWordWrap(True)
+        url_note.setStyleSheet("color: gray")
         self.file_label = QLabel("등록된 음악 없음")
         self.file_label.setWordWrap(True)
-        pick = QPushButton("음악 선택…")
+        pick = QPushButton("파일 선택…")
         pick.clicked.connect(self.pick_music)
         clear = QPushButton("빼기")
         clear.clicked.connect(self.clear_music)
+
+        # 시작 위치 게이지 + 미리듣기
+        self.gauge = MusicGauge()
+        self.gauge.start_changed.connect(self._on_gauge_start)
+        self.gauge.play_requested.connect(self._play_from)
+        self.player = MusicPreviewPlayer(self, self.gauge.set_playhead, self._on_play_stopped)
+        self.play_btn = QPushButton("▶ 시작 위치부터 듣기")
+        self.play_btn.clicked.connect(self._toggle_play)
         self.start_spin = seconds_spin()
         self.vol_slider, vol_lbl = percent_slider(200)
         self.fade_spin = seconds_spin(30, 0.5, 1)
         self.clip_vol_slider, clip_vol_lbl = percent_slider(200)
         mf = QFormLayout(music_box)
+        mf.addRow(row(self.url_edit, self.download_btn))
+        mf.addRow(url_note)
         mf.addRow(row(self.file_label, None, pick, clear))
-        mf.addRow("음악 시작 위치", self.start_spin)
+        mf.addRow(self.gauge)
+        mf.addRow("음악 시작 위치", row(self.start_spin, self.play_btn))
         mf.addRow("음악 소리", row(self.vol_slider, vol_lbl))
         mf.addRow("끝 페이드아웃", self.fade_spin)
         mf.addRow("영상 원본 소리", row(self.clip_vol_slider, clip_vol_lbl))
@@ -457,15 +481,21 @@ class MusicPanel(QWidget):
         else:
             self.beat_info.setText("아직 분석 전" if m.path else "")
         self.analyze_btn.setEnabled(bool(m.path))
+        self.play_btn.setEnabled(bool(m.path))
         if not m.path:
             self.strip.set_data([], [], 0)
             self.cut_info.setText("")
+            self.gauge.set_selection(0.0, 0.0)
             return
         segs = build_segments(self.project)
         length = max(total_duration(segs), 0.0)
         cuts = segment_starts(segs)[1:] if self.project.beat_sync.enabled else []
         view_len = length if length > 0 else max(0.0, m.duration - m.start)
         beats_rel = [b + m.beat_offset - m.start for b in m.beats]
+        if self.gauge.duration != m.duration:
+            self.gauge.duration = m.duration
+        self.gauge.set_beats([b + m.beat_offset for b in m.beats])
+        self.gauge.set_selection(m.start, length if self.project.clips else 0.0)
         self.strip.set_data(beats_rel, cuts, view_len)
         if self.project.beat_sync.enabled:
             if not m.beats:
@@ -479,27 +509,63 @@ class MusicPanel(QWidget):
 
     def pick_music(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "음악 선택", "", AUDIO_FILTER)
-        if not path:
+        if path:
+            self.music_chosen.emit(path)
+
+    def _request_download(self) -> None:
+        url = self.url_edit.text().strip()
+        if not url:
+            self.url_edit.setFocus()
             return
-        try:
-            info = probe(path)
-        except Exception as e:
-            QMessageBox.warning(self, "음악", str(e))
-            return
-        if not info.has_audio:
-            QMessageBox.warning(self, "음악", "소리가 없는 파일이에요.")
-            return
+        self.download_requested.emit(url)
+
+    def set_downloading(self, busy: bool) -> None:
+        self.download_btn.setEnabled(not busy)
+        self.url_edit.setEnabled(not busy)
+
+    def set_waveform(self, peaks) -> None:
+        self.gauge.set_waveform(peaks, self.project.music.duration)
+
+    # --- 미리듣기 ---
+    def _on_gauge_start(self, t: float) -> None:
+        self.start_spin.setValue(t)          # → _store
+        if self.player.playing:
+            self._play_from(t)
+
+    def _play_end(self) -> float | None:
+        length = self.gauge.length
+        return self.project.music.start + length if length > 0 else None
+
+    def _play_from(self, t: float) -> None:
         m = self.project.music
-        m.path, m.duration, m.start, m.bpm, m.beats, m.beat_offset = path, info.duration, 0.0, 0.0, [], 0.0
-        self.reload()
-        self.changed.emit()
-        self.analyze_requested.emit()
+        if not m.path:
+            return
+        stop = self._play_end()
+        if stop is not None and t >= stop:
+            stop = None
+        self.player.play(m.path, t, stop)
+        self.play_btn.setText("■ 정지")
+
+    def _toggle_play(self) -> None:
+        if self.player.playing:
+            self.player.stop()
+        else:
+            self._play_from(self.project.music.start)
+
+    def _on_play_stopped(self) -> None:
+        self.play_btn.setText("▶ 시작 위치부터 듣기")
+        self.gauge.set_playhead(None)
+
+    def stop_preview(self) -> None:
+        self.player.unload()
 
     def clear_music(self) -> None:
         from ..project import MusicSettings
 
+        self.player.unload()
         self.project.music = MusicSettings()
         self.project.beat_sync.enabled = False
+        self.gauge.set_waveform([], 0.0)
         self.reload()
         self.changed.emit()
 

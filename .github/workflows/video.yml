@@ -18,7 +18,7 @@ jobs:
       - name: ffmpeg 설치
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - name: 테스트 도구 설치
-        run: pip install numpy pytest
+        run: pip install numpy pytest yt-dlp
       - name: 단위·통합 테스트
         run: python -m pytest -q video/tests
 
@@ -39,16 +39,24 @@ jobs:
         run: >
           pyinstaller --noconfirm --windowed --name ReelCut
           --collect-all faster_whisper --collect-all ctranslate2
+          --collect-all yt_dlp_ejs --collect-submodules yt_dlp
           run_reelcut.py
       - name: FFmpeg 함께 넣기
         shell: pwsh
         run: |
-          $url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n7.1-latest-win64-gpl-7.1.zip"
+          $url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
           Invoke-WebRequest $url -OutFile ffmpeg.zip
           Expand-Archive ffmpeg.zip -DestinationPath ffmpeg_tmp
           New-Item -ItemType Directory -Force dist/ReelCut/ffmpeg | Out-Null
           Get-ChildItem ffmpeg_tmp -Recurse -Include ffmpeg.exe,ffprobe.exe | Copy-Item -Destination dist/ReelCut/ffmpeg
           if (-not (Test-Path dist/ReelCut/ffmpeg/ffmpeg.exe)) { throw "ffmpeg.exe 를 찾지 못함" }
+      - name: Deno 함께 넣기 (유튜브 받기에 필요)
+        shell: pwsh
+        run: |
+          Invoke-WebRequest "https://github.com/denoland/deno/releases/latest/download/deno-x86_64-pc-windows-msvc.zip" -OutFile deno.zip
+          New-Item -ItemType Directory -Force dist/ReelCut/deno | Out-Null
+          Expand-Archive deno.zip -DestinationPath dist/ReelCut/deno -Force
+          if (-not (Test-Path dist/ReelCut/deno/deno.exe)) { throw "deno.exe 를 찾지 못함" }
       - uses: actions/upload-artifact@v4
         with:
           name: ReelCut-win-x64

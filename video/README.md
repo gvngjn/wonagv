@@ -13,6 +13,10 @@
 - 소리가 없는 영상, 사진(기본 3초)도 섞어 쓸 수 있음
 
 ### 2. 🎵 노래 등록 + 비트에 맞춰 잘라 이어붙이기
+- **유튜브 링크를 붙여넣고 "mp3로 받기"** → `내 음악\ReelCut` 폴더에 mp3로 저장되고 바로 등록 ([yt-dlp](https://github.com/yt-dlp/yt-dlp) 사용)
+  - 갖고 있는 음악 파일을 고르거나 창에 끌어다 놓아도 됨
+- **파형 게이지에서 몇 초부터 쓸지 고르기** — 클릭/드래그로 시작 위치 지정, 주황색이 실제로 쓰이는 구간
+  - "▶ 시작 위치부터 듣기"(또는 파형 더블클릭·스페이스)로 바로 미리듣기, ←/→ 0.1초 (Shift: 1초) 미세 조정
 - 음악(mp3, wav, m4a, flac …)을 등록하면 **템포(BPM)와 비트 위치를 자동 분석**
 - "사용하기"를 켜면 클립을 **1·2·4·8·16비트마다 잘라서** 비트 순간에 화면이 바뀌는 영상을 만듦
   - 컷 위치는 프레임 단위로 맞춰서 길어져도 박자가 밀리지 않음
@@ -21,6 +25,11 @@
 - 분석이 틀리면: ×2 · ÷2 버튼, BPM 직접 입력, 비트 위치 미세 조정
 - 음악 시작 위치, 음악/원본 소리 크기, 끝 페이드아웃 조절
 - 비트 맞춤을 끄면 음악은 **배경음**으로만 깔림
+
+> **노래는 어디서 구하나요?** 영상을 올릴 거라면 저작권 걱정 없는 곳을 추천해요:
+> [YouTube 오디오 보관함](https://studio.youtube.com)(유튜브 스튜디오 → 오디오 보관함),
+> [Pixabay Music](https://pixabay.com/music/), [공유마당](https://gongu.copyright.or.kr/), [FreeMusicArchive](https://freemusicarchive.org/).
+> 이런 곡의 유튜브 링크나 다운로드 파일을 그대로 쓰면 돼요. 일반 가요·팝은 업로드 시 저작권 차단이나 수익 제한이 걸릴 수 있어요.
 
 ### 3. 💬 자동 자막
 - [faster-whisper](https://github.com/SYSTRAN/faster-whisper)(OpenAI Whisper) 음성 인식으로 자막 자동 생성
@@ -49,7 +58,7 @@
 ## 설치 (빌드된 exe 받기)
 1. GitHub 저장소 → **Actions** 탭 → "영상 편집기 빌드" 최신 실행 선택
 2. 아래 **Artifacts** 에서 `ReelCut-win-x64` 다운로드 → 압축 해제
-3. 폴더 안의 `ReelCut.exe` 실행 (FFmpeg 포함, Python 설치 불필요)
+3. 폴더 안의 `ReelCut.exe` 실행 (FFmpeg·Deno 포함, Python 설치 불필요)
 
 > 서명되지 않은 exe라 처음 실행 시 SmartScreen 경고가 뜰 수 있어요 → "추가 정보" → "실행".
 
@@ -77,5 +86,7 @@ FFmpeg가 설치돼 있으면 실제 영상을 만들어 보는 통합 테스트
 | `reelcut/timeline.py` | 클립 → 렌더링 조각 (이어붙이기 / 비트 맞춤 컷 계획) |
 | `reelcut/render.py` | FFmpeg 2단계 렌더링 (조각 규격화 → 이어붙이기 + PiP + 자막 + 음악 믹스) |
 | `reelcut/subtitles.py` | SRT 읽기/쓰기, Whisper 자동 자막 |
+| `reelcut/download.py` | 유튜브 등 링크 → mp3 (yt-dlp) |
+| `reelcut/gui/music_gauge.py` | 음악 파형 게이지 · 미리듣기 |
 | `reelcut/ffmpeg.py` | FFmpeg 찾기, 미디어 정보, 진행률 읽기·취소 |
 | `reelcut/gui/` | PySide6 화면 |
