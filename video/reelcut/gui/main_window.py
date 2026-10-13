@@ -127,7 +127,11 @@ class MainWindow(QMainWindow):
         music_scroll.setWidget(self.music)
         self.tabs.addTab(music_scroll, "🎵 음악·비트")
         self.tabs.addTab(self.pips, "🖼 화면 속 화면")
-        self.tabs.addTab(self.subs, "💬 자막")
+        subs_scroll = QScrollArea()
+        subs_scroll.setWidgetResizable(True)
+        subs_scroll.setFrameShape(QScrollArea.NoFrame)
+        subs_scroll.setWidget(self.subs)
+        self.tabs.addTab(subs_scroll, "💬 자막")
 
         for panel in (self.clips, self.music, self.pips, self.subs):
             panel.changed.connect(self._on_changed)

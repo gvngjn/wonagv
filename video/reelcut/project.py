@@ -98,7 +98,13 @@ class SubtitleSettings:
     burn_in: bool = True           # True: 영상에 입히기 / False: 자막 트랙으로 넣기
     font_size: int = 22            # libass 기준 크기 (영상 높이 288 기준 스케일)
     font_name: str = "Malgun Gothic"
+    font_file: str = ""            # 설치 안 한 글꼴 파일(.ttf/.otf)을 쓸 때 경로
+    bold: bool = False
+    color: str = "#FFFFFF"         # 글자색
+    outline_color: str = "#000000"
     outline: int = 2
+    box: bool = False              # 글자 뒤에 반투명 상자
+    position: str = "bottom"       # bottom | middle | top
     margin_v: int = 24
     model: str = "small"
     language: str = "ko"           # "" = 자동 감지

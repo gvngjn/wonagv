@@ -67,3 +67,20 @@ def test_timeline_audio_length_matches_segments(media):
     p = base_project(media)
     audio = timeline_audio(build_segments(p))
     assert len(audio) == pytest.approx(7.0 * 16000, abs=2)
+
+
+@needs_ffmpeg
+def test_burn_in_with_font_file(media, tmp_path):
+    import glob
+    fonts = sorted(glob.glob("/usr/share/fonts/**/*.ttf", recursive=True))
+    if not fonts:
+        pytest.skip("테스트할 글꼴 파일 없음")
+    p = base_project(media)
+    p.subtitles.entries = [SubtitleEntry(0.0, 2.0, "Font test")]
+    p.subtitles.font_file = fonts[0]
+    p.subtitles.font_name = "Whatever"
+    p.subtitles.box = True
+    p.subtitles.position = "top"
+    out = tmp_path / "font.mp4"
+    Renderer().render(p, str(out), preview=True)
+    assert probe(str(out)).duration == pytest.approx(7.0, abs=0.1)

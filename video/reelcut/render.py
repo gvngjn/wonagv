@@ -111,12 +111,91 @@ def pip_window(p: PipOverlay, total: float) -> tuple[float, float]:
     return start, min(end, total)
 
 
+FONT_EXTS = {".ttf", ".otf", ".ttc", ".otc"}
+# ffmpeg의 SRT 자막은 옛 SSA 정렬 번호를 쓴다 (2 아래, 10 가운데, 6 위)
+_ALIGN = {"bottom": 2, "middle": 10, "top": 6}
+
+
+def ass_color(hex_color: str, alpha: int = 0) -> str:
+    """'#RRGGBB' → ASS 색 '&HAABBGGRR'."""
+    h = hex_color.strip().lstrip("#")
+    if len(h) != 6:
+        h = "FFFFFF"
+    r, g, b = h[0:2], h[2:4], h[4:6]
+    return f"&H{alpha:02X}{b}{g}{r}".upper()
+
+
 def ass_style(s: SubtitleSettings) -> str:
-    return (
-        f"FontName={s.font_name},FontSize={s.font_size},PrimaryColour=&H00FFFFFF,"
-        f"OutlineColour=&H00000000,BorderStyle=1,Outline={s.outline},Shadow=0,"
-        f"Alignment=2,MarginV={s.margin_v}"
-    )
+    name = s.font_name.replace(",", " ").replace("'", "")
+    parts = [
+        f"FontName={name}", f"FontSize={s.font_size}", f"Bold={-1 if s.bold else 0}",
+        f"PrimaryColour={ass_color(s.color)}",
+    ]
+    if s.box:
+        # BorderStyle=3: 외곽선 대신 상자, 상자 색은 OutlineColour(반투명)
+        parts += ["BorderStyle=3", f"OutlineColour={ass_color(s.outline_color, 0x60)}",
+                  f"Outline={max(1, s.outline)}"]
+    else:
+        parts += ["BorderStyle=1", f"OutlineColour={ass_color(s.outline_color)}", f"Outline={s.outline}"]
+    parts += ["Shadow=0", f"Alignment={_ALIGN.get(s.position, 2)}", f"MarginV={s.margin_v}"]
+    return ",".join(parts)
+
+
+def windows_font_file(family: str) -> str | None:
+    """Windows 레지스트리에서 글꼴 이름에 해당하는 파일 찾기 (사용자 설치 글꼴 포함)."""
+    if os.name != "nt" or not family:
+        return None
+    import winreg
+
+    key_path = r"Software\Microsoft\Windows NT\CurrentVersion\Fonts"
+    fonts_dir = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"
+    want = family.lower()
+    for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+        try:
+            key = winreg.OpenKey(hive, key_path)
+        except OSError:
+            continue
+        with key:
+            i = 0
+            while True:
+                try:
+                    name, value, _ = winreg.EnumValue(key, i)
+                except OSError:
+                    break
+                i += 1
+                label = name.split(" (")[0].lower()
+                names = [n.strip() for n in label.split("&")]
+                if want in names or label == want:
+                    p = Path(value)
+                    if not p.is_absolute():
+                        p = fonts_dir / p
+                    if p.exists():
+                        return str(p)
+    return None
+
+
+def prepare_fonts(subs: SubtitleSettings, work: Path) -> str | None:
+    """자막 글꼴 파일을 작업 폴더의 fonts/에 복사. 복사했으면 'fonts' 반환."""
+    candidates = []
+    if subs.font_file and Path(subs.font_file).suffix.lower() in FONT_EXTS and Path(subs.font_file).exists():
+        candidates.append(subs.font_file)
+    else:
+        found = windows_font_file(subs.font_name)
+        if found:
+            candidates.append(found)
+    if not candidates:
+        return None
+    d = work / "fonts"
+    d.mkdir(exist_ok=True)
+    for i, f in enumerate(candidates):
+        shutil.copy(f, d / f"font{i}{Path(f).suffix.lower()}")
+    return "fonts"
+
+
+def fonts_option(fonts_dir: str | None) -> str:
+    if fonts_dir:
+        return f":fontsdir={fonts_dir}"
+    return windows_fonts_option()
 
 
 def windows_fonts_option() -> str:
@@ -131,7 +210,7 @@ def windows_fonts_option() -> str:
 
 
 def final_args(project: Project, concat_list: str, total: float, out_path: str,
-               opt: RenderOptions, srt_name: str | None) -> list[str]:
+               opt: RenderOptions, srt_name: str | None, fonts_dir: str | None = None) -> list[str]:
     """2단계 명령 인자. srt_name은 작업 폴더(cwd) 기준 상대 경로."""
     args = ["-f", "concat", "-safe", "0", "-i", concat_list]
     vf: list[str] = []
@@ -192,7 +271,7 @@ def final_args(project: Project, concat_list: str, total: float, out_path: str,
     subs = project.subtitles
     if srt_name and subs.burn_in:
         style = ass_style(subs).replace("'", "")
-        vf.append(f"{base}subtitles={srt_name}:charenc=UTF-8{windows_fonts_option()}:force_style='{style}'[vsub]")
+        vf.append(f"{base}subtitles={srt_name}:charenc=UTF-8{fonts_option(fonts_dir)}:force_style='{style}'[vsub]")
         base = "[vsub]"
     vf.append(f"{base}format=yuv420p[vout]")
 
@@ -270,13 +349,16 @@ class Renderer:
             (work / "list.txt").write_text(concat_list_text(files), encoding="utf-8")
 
             srt_name = None
+            fonts_dir = None
             if project.subtitles.entries:
                 srt_name = "subs.srt"
                 save_srt(work / srt_name, project.subtitles.entries)
+                if project.subtitles.burn_in:
+                    fonts_dir = prepare_fonts(project.subtitles, work)
 
             out_abs = str(Path(out_path).resolve())
             Path(out_abs).parent.mkdir(parents=True, exist_ok=True)
-            args = final_args(project, "list.txt", total, out_abs, opt, srt_name)
+            args = final_args(project, "list.txt", total, out_abs, opt, srt_name, fonts_dir)
             self.runner.run(
                 args, lambda t: report(0.5 + 0.5 * min(1.0, t / total), "최종 영상 만드는 중"),
                 cwd=str(work),

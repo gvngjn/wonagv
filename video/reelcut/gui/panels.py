@@ -17,6 +17,7 @@ from ..ffmpeg import probe
 from ..project import Clip, PipOverlay, Project, SubtitleEntry
 from ..render import is_image
 from .music_gauge import MusicGauge, MusicPreviewPlayer
+from .subtitle_style import ColorButton, SubtitleSample, font_file_families, register_font_file
 
 VIDEO_FILTER = "영상·사진 (*.mp4 *.mov *.mkv *.avi *.webm *.m4v *.wmv *.jpg *.jpeg *.png *.bmp *.webp);;모든 파일 (*)"
 AUDIO_FILTER = "음악 (*.mp3 *.wav *.m4a *.aac *.flac *.ogg *.opus *.wma *.mp4);;모든 파일 (*)"
@@ -826,6 +827,8 @@ class SubtitlePanel(QWidget):
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         self.table.verticalHeader().setVisible(False)
         self.table.itemChanged.connect(self._on_item_changed)
+        self.table.setMinimumHeight(160)
+        self.table.currentCellChanged.connect(lambda r, *_: self._update_sample())
 
         add = QPushButton("＋ 줄 추가")
         add.clicked.connect(self.add_row)
@@ -843,17 +846,37 @@ class SubtitlePanel(QWidget):
         self.burn.addItem("영상에 입히기 (어디서나 보임)", True)
         self.burn.addItem("자막 트랙으로 넣기 (끄고 켤 수 있음)", False)
         self.font = QFontComboBox()
+        self.font.setToolTip("컴퓨터에 설치된 글꼴")
+        font_file_btn = QPushButton("글꼴 파일…")
+        font_file_btn.setToolTip("설치하지 않은 .ttf / .otf 글꼴 파일을 바로 사용")
+        font_file_btn.clicked.connect(self.pick_font_file)
+        self.font_file_label = QLabel()
+        self.font_file_label.setStyleSheet("color: gray")
+        self.font_file_clear = QPushButton("파일 해제")
+        self.font_file_clear.clicked.connect(self.clear_font_file)
         self.font_size = QSpinBox()
-        self.font_size.setRange(8, 80)
+        self.font_size.setRange(8, 120)
+        self.bold = QCheckBox("굵게")
+        self.color_btn = ColorButton("#FFFFFF")
+        self.outline_color_btn = ColorButton("#000000")
         self.outline = QSpinBox()
-        self.outline.setRange(0, 8)
+        self.outline.setRange(0, 10)
+        self.box = QCheckBox("배경 상자")
+        self.box.setToolTip("외곽선 대신 글자 뒤에 반투명 상자 (상자 색 = 외곽선 색)")
+        self.position = QComboBox()
+        for label, key in (("아래", "bottom"), ("가운데", "middle"), ("위", "top")):
+            self.position.addItem(label, key)
         self.margin = QSpinBox()
         self.margin.setRange(0, 200)
+        self.sample = SubtitleSample()
         sf = QFormLayout(style_box)
         sf.addRow("넣는 방식", self.burn)
-        sf.addRow("글꼴", self.font)
-        sf.addRow("크기 / 외곽선", row(self.font_size, QLabel("외곽선"), self.outline))
-        sf.addRow("아래 여백", self.margin)
+        sf.addRow("글꼴", row(self.font, font_file_btn))
+        sf.addRow("", row(self.font_file_label, None, self.font_file_clear))
+        sf.addRow("크기", row(self.font_size, self.bold, None))
+        sf.addRow("글자색", row(self.color_btn, QLabel("외곽선"), self.outline_color_btn, self.outline, self.box, None))
+        sf.addRow("위치", row(self.position, QLabel("여백"), self.margin, None))
+        sf.addRow(self.sample)
 
         self.warn = QLabel()
         self.warn.setWordWrap(True)
@@ -868,9 +891,14 @@ class SubtitlePanel(QWidget):
 
         for w in (self.model, self.lang, self.source, self.burn):
             w.currentIndexChanged.connect(self._store)
-        self.font.currentFontChanged.connect(self._store)
+        self.font.currentFontChanged.connect(self._on_font_picked)
         for w in (self.font_size, self.outline, self.margin):
             w.valueChanged.connect(self._store)
+        for w in (self.bold, self.box):
+            w.toggled.connect(self._store)
+        self.position.currentIndexChanged.connect(self._store)
+        for w in (self.color_btn, self.outline_color_btn):
+            w.color_changed.connect(self._store)
         self.reload()
 
     def reload(self) -> None:
@@ -881,10 +909,18 @@ class SubtitlePanel(QWidget):
         self.source.setCurrentIndex(max(0, self.source.findData(s.source)))
         self.burn.setCurrentIndex(0 if s.burn_in else 1)
         from PySide6.QtGui import QFont
+        if s.font_file:
+            register_font_file(s.font_file)
         self.font.setCurrentFont(QFont(s.font_name))
         self.font_size.setValue(s.font_size)
+        self.bold.setChecked(s.bold)
+        self.color_btn.set_color(s.color)
+        self.outline_color_btn.set_color(s.outline_color)
         self.outline.setValue(s.outline)
+        self.box.setChecked(s.box)
+        self.position.setCurrentIndex(max(0, self.position.findData(s.position)))
         self.margin.setValue(s.margin_v)
+        self._update_font_file_label()
         self.table.setRowCount(0)
         for e in sorted(s.entries, key=lambda x: x.start):
             self._append(e)
@@ -906,10 +942,15 @@ class SubtitlePanel(QWidget):
         s.language = self.lang.currentData()
         s.source = self.source.currentData()
         s.burn_in = bool(self.burn.currentData())
-        s.font_name = self.font.currentFont().family()
         s.font_size = self.font_size.value()
+        s.bold = self.bold.isChecked()
+        s.color = self.color_btn.color
+        s.outline_color = self.outline_color_btn.color
         s.outline = self.outline.value()
+        s.box = self.box.isChecked()
+        s.position = self.position.currentData()
         s.margin_v = self.margin.value()
+        self._update_sample()
         self.changed.emit()
 
     def _on_item_changed(self, _item) -> None:
@@ -976,3 +1017,51 @@ class SubtitlePanel(QWidget):
         path, _ = QFileDialog.getSaveFileName(self, "SRT 저장", "자막.srt", "자막 (*.srt)")
         if path:
             subs.save_srt(path, self.project.subtitles.entries)
+
+    # --- 글꼴 ---
+    def _on_font_picked(self, font) -> None:
+        if self._loading:
+            return
+        s = self.project.subtitles
+        s.font_name = font.family()
+        if s.font_file and s.font_name not in font_file_families(s.font_file):
+            s.font_file = ""          # 목록에서 다른 글꼴을 고르면 파일 글꼴은 해제
+        self._update_font_file_label()
+        self._store()
+
+    def pick_font_file(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "글꼴 파일 선택", "", "글꼴 (*.ttf *.otf *.ttc);;모든 파일 (*)")
+        if not path:
+            return
+        families = register_font_file(path)
+        if not families:
+            QMessageBox.warning(self, "글꼴", "글꼴 파일을 읽을 수 없어요.")
+            return
+        s = self.project.subtitles
+        s.font_file, s.font_name = path, families[0]
+        self._loading = True
+        from PySide6.QtGui import QFont
+        self.font.setCurrentFont(QFont(families[0]))
+        self._loading = False
+        self._update_font_file_label()
+        self._store()
+
+    def clear_font_file(self) -> None:
+        s = self.project.subtitles
+        s.font_file = ""
+        s.font_name = self.font.currentFont().family()
+        self._update_font_file_label()
+        self._store()
+
+    def _update_font_file_label(self) -> None:
+        f = self.project.subtitles.font_file
+        self.font_file_label.setText(f"파일 글꼴 사용 중: {Path(f).name}" if f else "설치된 글꼴 사용 중")
+        self.font_file_clear.setVisible(bool(f))
+        self._update_sample()
+
+    def _update_sample(self) -> None:
+        text = "자막 미리보기 Subtitle 123"
+        r = self.table.currentRow()
+        if 0 <= r < self.table.rowCount() and self.table.item(r, 2) and self.table.item(r, 2).text().strip():
+            text = self.table.item(r, 2).text()
+        self.sample.set_style(self.project.subtitles, text)

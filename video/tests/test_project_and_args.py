@@ -52,3 +52,40 @@ def test_final_args_mixes_music_pip_and_subtitles():
     p.subtitles.burn_in = False
     args = final_args(p, "list.txt", 10.0, "out.mp4", RenderOptions(1280, 720, 30), "subs.srt")
     assert "mov_text" in args and "subtitles=" not in args[args.index("-filter_complex") + 1]
+
+
+def test_ass_style_colors_position_and_box():
+    from reelcut.project import SubtitleSettings
+    from reelcut.render import ass_color, ass_style
+
+    assert ass_color("#FFE000") == "&H0000E0FF"
+    assert ass_color("#000000", 0x60) == "&H60000000"
+    s = SubtitleSettings(font_name="My, Font", bold=True, color="#FF0000", position="top")
+    style = ass_style(s)
+    assert "FontName=My  Font" in style and "Bold=-1" in style
+    assert "PrimaryColour=&H000000FF" in style and "Alignment=6" in style and "BorderStyle=1" in style
+    s.box, s.position = True, "middle"
+    style = ass_style(s)
+    assert "BorderStyle=3" in style and "Alignment=10" in style
+
+
+def test_prepare_fonts_copies_font_file(tmp_path):
+    from reelcut.project import SubtitleSettings
+    from reelcut.render import prepare_fonts
+
+    font = tmp_path / "Cute.ttf"
+    font.write_bytes(b"fake")
+    work = tmp_path / "work"
+    work.mkdir()
+    assert prepare_fonts(SubtitleSettings(font_file=str(font)), work) == "fonts"
+    assert (work / "fonts" / "font0.ttf").read_bytes() == b"fake"
+    import os
+    if os.name != "nt":
+        assert prepare_fonts(SubtitleSettings(font_file=str(tmp_path / "없음.ttf")), work) is None
+
+
+def test_final_args_uses_relative_fonts_dir():
+    p = Project()
+    p.subtitles.entries.append(SubtitleEntry(0, 1, "a"))
+    args = final_args(p, "list.txt", 5.0, "out.mp4", RenderOptions(640, 360, 30), "subs.srt", "fonts")
+    assert "subtitles=subs.srt:charenc=UTF-8:fontsdir=fonts:force_style=" in args[args.index("-filter_complex") + 1]
