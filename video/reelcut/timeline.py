@@ -84,22 +84,32 @@ def beat_sync_segments(clips: list[Clip], boundaries: list[float], order: str = 
             segs.append(Segment(c.path, start, d, c.has_audio))
         return segs
 
-    # sequential
-    ci = 0
-    pos = usable[0].in_point
-    for d in durations:
-        c = usable[ci]
-        if pos + d > c.end + 1e-6:
-            # 남은 부분이 컷 길이보다 짧으면 다음 클립으로
-            for _ in range(len(usable)):
-                ci = (ci + 1) % len(usable)
-                c = usable[ci]
-                pos = c.in_point
-                if c.length >= d:
-                    break
-        segs.append(Segment(c.path, pos, d, c.has_audio))
-        pos += d
+    # sequential: 클립 순서대로, 클립마다 길이에 비례한 개수의 컷을 고르게 떨어진 위치에서 뽑는다.
+    # (바로 이어지는 구간을 쓰면 컷이 바뀌어도 화면이 이어져 보여서 장면 전환이 안 느껴진다)
+    counts = _allocate(durations, usable)
+    order = [k for k, n in enumerate(counts) for _ in range(n)]
+    used = [0] * len(usable)
+    for d, k in zip(durations, order):
+        c = usable[k]
+        slot = c.length / counts[k]
+        start = c.in_point + used[k] * slot + max(0.0, (slot - d) / 2)
+        start = max(c.in_point, min(start, c.end - d))
+        used[k] += 1
+        segs.append(Segment(c.path, start, d, c.has_audio))
     return segs
+
+
+def _allocate(durations: list[float], clips: list[Clip]) -> list[int]:
+    """컷 개수를 클립 길이에 비례해서 나눈다 (최대 잉여 방식, 합계 = 컷 수)."""
+    n = len(durations)
+    lengths = [c.length for c in clips]
+    total = sum(lengths) or 1.0
+    exact = [n * l / total for l in lengths]
+    counts = [int(x) for x in exact]
+    rest = sorted(range(len(clips)), key=lambda i: exact[i] - counts[i], reverse=True)
+    for i in rest[: n - sum(counts)]:
+        counts[i] += 1
+    return counts
 
 
 def build_segments(project: Project) -> list[Segment]:
@@ -113,10 +123,12 @@ def build_segments(project: Project) -> list[Segment]:
         return segs
 
     total_clips = sum(c.length for c in clips)
-    if bs.use_music_length and music.duration > 0:
-        end_time = max(0.0, music.duration - music.start)
+    music_left = max(0.0, music.duration - music.start) if music.duration > 0 else total_clips
+    if bs.use_music_length:
+        end_time = music_left
     else:
-        end_time = total_clips
+        # 비트는 음악이 있는 동안만 있으므로 음악보다 길게 만들지 않는다
+        end_time = min(total_clips, music_left)
     if bs.max_duration > 0:
         end_time = min(end_time, bs.max_duration)
     beats = [b + music.beat_offset for b in music.beats]

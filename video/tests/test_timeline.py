@@ -46,8 +46,21 @@ def test_beat_sync_fills_every_cut_within_clip_ranges(order):
 
 def test_sequential_walks_through_clips_in_order():
     segs = beat_sync_segments(clips(), [0, 4, 8, 12, 14], "sequential")
-    assert [(s.path, s.src_start) for s in segs] == [
-        ("a.mp4", 0.0), ("a.mp4", 4.0), ("b.mp4", 1.0), ("c.mp4", 0.0)]
+    # 클립 길이(10, 4, 3)에 비례해서 컷 배분, 순서는 클립 순서대로
+    assert [s.path for s in segs] == ["a.mp4", "a.mp4", "b.mp4", "c.mp4"]
+    assert segs[0].src_start < segs[1].src_start
+
+
+def test_sequential_cuts_jump_instead_of_continuing():
+    """같은 클립에서 연달아 뽑아도 바로 이어지는 구간이 아니라 건너뛰어야 장면 전환이 보인다."""
+    long_clip = [Clip("concert.mp4", 850.0)]
+    bounds = [i * 0.857 for i in range(281)]          # 140BPM 2비트마다, 4분
+    segs = beat_sync_segments(long_clip, bounds, "sequential")
+    assert len(segs) == 280
+    gaps = [b.src_start - (a.src_start + a.duration) for a, b in zip(segs, segs[1:])]
+    assert min(gaps) > 1.0                             # 매 컷마다 1초 넘게 건너뜀
+    assert segs[-1].src_start + segs[-1].duration <= 850.0
+    assert segs[-1].src_start > 800                    # 클립 전체를 고르게 사용
 
 
 def test_random_never_repeats_same_clip_twice_in_a_row():
@@ -68,3 +81,12 @@ def test_build_segments_without_beats_falls_back_to_concat():
     p = Project(clips=clips())
     p.beat_sync.enabled = True
     assert total_duration(build_segments(p)) == pytest.approx(17.0)
+
+
+def test_clip_length_mode_never_exceeds_music():
+    p = Project(clips=[Clip("long.mp4", 850.0)])
+    p.music = MusicSettings(path="m.mp3", duration=240.0, beats=[0.43 * i for i in range(560)])
+    p.beat_sync = BeatSyncSettings(enabled=True, beats_per_cut=2, use_music_length=False)
+    segs = build_segments(p)
+    assert total_duration(segs) == pytest.approx(240.0, abs=0.05)
+    assert max(s.duration for s in segs) < 1.0         # 음악 끝난 뒤 긴 덩어리가 없어야 함

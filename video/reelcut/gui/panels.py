@@ -402,7 +402,7 @@ class MusicPanel(QWidget):
         self.shuffle_btn.clicked.connect(self._reshuffle)
         self.length_mode = QComboBox()
         self.length_mode.addItem("음악 길이만큼", True)
-        self.length_mode.addItem("클립 길이만큼", False)
+        self.length_mode.addItem("클립 길이만큼 (최대 음악 길이)", False)
         self.max_spin = seconds_spin(36000, 1, 0)
         self.max_spin.setSpecialValueText("제한 없음")
         self.strip = BeatStrip()
