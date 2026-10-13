@@ -147,6 +147,28 @@ def cmd_import(args):
 
 # ---------------------------------------------------------------- build
 
+CHOSUNG = "ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ"
+
+
+def chosung(text):
+    """초성 힌트. 한글은 초성만, 영어 등은 단어 첫 글자만 남기고 나머지는 _ 로.
+
+    '밤양갱' -> 'ㅂㅇㄱ', 'Super Shy' -> 'S____ S__'
+    """
+    out, word_start = [], True
+    for ch in text:
+        if "가" <= ch <= "힣":
+            out.append(CHOSUNG[(ord(ch) - 0xAC00) // 588])
+            word_start = False
+        elif ch.isalnum():
+            out.append(ch if word_start else "_")
+            word_start = False
+        else:
+            out.append(ch)
+            word_start = True
+    return "".join(out)
+
+
 def answer_variants(row):
     """채팅으로 인정할 문자열들. answers 칸은 ';' 로 구분."""
     base = [row["title"]] + [a for a in (row.get("answers") or "").split(";")]
@@ -240,6 +262,7 @@ def cmd_build(args):
         songs.append({
             "title": row["title"].strip(),
             "artist": (row.get("artist") or "").strip(),
+            "chosung": chosung(row["title"].strip()),
             "chunks": [{"file": str(c.resolve()),
                         "mpq_name": f"songquiz\\{n:03d}_{k:02d}.{args.format}"}
                        for k, c in enumerate(chunks)],
@@ -263,6 +286,7 @@ def cmd_build(args):
         "songs": songs,
         "chunk_frames": chunk_frames,
         "hint_seconds": args.hint,
+        "extra_seconds": args.extra,
         "gap_seconds": 3,
         "chat_addr": "0x58D900",
         "signal_unit": args.signal_unit,
@@ -313,6 +337,8 @@ def main():
     p.add_argument("--chunk", type=float, default=2,
                    help="조각 길이(초). 정답/스킵 시 최대 이만큼 더 들린 뒤 꺼짐")
     p.add_argument("--hint", type=float, default=10, help="가수 힌트가 나오는 시점(초)")
+    p.add_argument("--extra", type=float, default=10,
+                   help="노래가 끝난 뒤 초성 힌트를 보여 주고 더 기다리는 시간(초). 0이면 바로 정답 공개")
     p.add_argument("--limit", type=int, help="최대 곡 수")
     p.add_argument("--format", choices=["ogg", "wav"], default="ogg")
     p.add_argument("--signal-unit", default="Terran Command Center",

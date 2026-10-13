@@ -33,6 +33,7 @@ MAX_CHUNKS = max(len(s["chunks"]) for s in SONGS)
 FPS = 1000 / 42
 HINT_FRAMES = int(DATA["hint_seconds"] * FPS)
 GAP_FRAMES = int(DATA["gap_seconds"] * FPS)
+EXTRA_FRAMES = int(DATA.get("extra_seconds", 0) * FPS)  # 초성 힌트 후 추가 시간
 START_DELAY_FRAMES = int(5 * FPS)
 
 RALLY_X0 = 64
@@ -58,6 +59,7 @@ chunk_at = EUDVariable(0)     # 다음 조각을 틀 게임 틱
 next_at = EUDVariable(0)
 hint_at = EUDVariable(0)
 hint_shown = EUDVariable(0)
+overtime = EUDVariable(0)     # 1 = 노래 끝, 초성 힌트 보고 맞히는 추가 시간
 signal_ptr = EUDArray(8)
 scores = EUDArray(8)
 skip_voted = EUDArray(8)
@@ -124,6 +126,7 @@ def start_round(now):
     chunk_at << now
     hint_at << now + HINT_FRAMES
     hint_shown << 0
+    overtime << 0
     for p in range(8):
         skip_voted[p] = 0
     state << ST_GUESS
@@ -131,6 +134,13 @@ def start_round(now):
 
 def show_hint(i):
     DoActions(DisplayTextAll(f"\x1c힌트:\x04 가수는 \x11{SONGS[i]['artist']}"))
+
+
+def show_chosung(i):
+    DoActions(DisplayTextAll(
+        f"\x08노래 끝!\x04 {EXTRA_FRAMES * 42 // 1000}초 더! "
+        f"\x1c초성 힌트:\x04 \x11{SONGS[i]['chosung']}"
+    ))
 
 
 def show_answer(i):
@@ -271,10 +281,19 @@ def beforeTriggerExec():
             hint_shown << 1
             for_each_song(show_hint)
         EUDEndIf()
-        if EUDIf()(now >= chunk_at):
+        if EUDIf()([overtime == 1, now >= next_at]):
+            DoActions(DisplayTextAll("\x08시간 초과!"))
+            end_round(now)
+        if EUDElseIf()([overtime == 0, now >= chunk_at]):
             if EUDIf()(chunk >= chunk_count[cur]):
-                DoActions(DisplayTextAll("\x08시간 초과!"))
-                end_round(now)
+                if EXTRA_FRAMES > 0:
+                    # 노래가 다 끝나면 초성을 보여 주고 조금 더 기다린다
+                    for_each_song(show_chosung)
+                    overtime << 1
+                    next_at << now + EXTRA_FRAMES
+                else:
+                    DoActions(DisplayTextAll("\x08시간 초과!"))
+                    end_round(now)
             if EUDElse()():
                 play_chunk()
                 chunk << chunk + 1
