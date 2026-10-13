@@ -10,22 +10,28 @@ from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
-    QComboBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QMainWindow,
+    QButtonGroup, QComboBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QMainWindow,
     QMessageBox, QProgressBar, QPushButton, QScrollArea, QSlider, QSplitter, QStyle, QTabWidget,
     QVBoxLayout, QWidget,
 )
 
 from .. import __version__
-from ..project import Project
+from ..project import ASPECTS, Project, find_aspect
 from .panels import ClipsPanel, MusicPanel, PipPanel, SubtitlePanel, fmt_time
+from .panels import row as row_widget
 from .workers import TaskThread
 
-RESOLUTIONS = [
-    ("가로 1080p (1920×1080)", 1920, 1080),
-    ("가로 720p (1280×720)", 1280, 720),
-    ("세로 쇼츠·릴스 (1080×1920)", 1080, 1920),
-    ("정사각형 (1080×1080)", 1080, 1080),
-    ("가로 4K (3840×2160)", 3840, 2160),
+ASPECT_BUTTONS = [
+    ("16:9", "▭  유튜브\n가로 16:9"),
+    ("9:16", "▯  릴스·쇼츠\n세로 9:16"),
+    ("1:1", "□  정사각형\n1:1"),
+    ("4:5", "▯  인스타 피드\n4:5"),
+]
+SIZES = [("720p", "720p (가벼움)"), ("1080p", "1080p (추천)"), ("4K", "4K (고화질)")]
+FITS = [
+    ("blur", "흐린 배경으로 채우기"),
+    ("crop", "잘라서 꽉 채우기"),
+    ("pad", "검은 여백 넣기"),
 ]
 QUALITIES = [("높음 (파일 큼)", 18), ("보통", 21), ("작은 파일", 26)]
 FPS_CHOICES = [24.0, 25.0, 30.0, 60.0]
@@ -184,16 +190,38 @@ class MainWindow(QMainWindow):
 
     def _build_export_box(self) -> QGroupBox:
         box = QGroupBox("내보내기")
-        self.res = QComboBox()
-        for label, w, h in RESOLUTIONS:
-            self.res.addItem(label, f"{w}x{h}")
+        # 화면 비율 (유튜브 / 릴스 …)
+        self.aspect_group = QButtonGroup(self)
+        self.aspect_group.setExclusive(True)
+        aspect_row = QWidget()
+        al = QHBoxLayout(aspect_row)
+        al.setContentsMargins(0, 0, 0, 0)
+        for key, label in ASPECT_BUTTONS:
+            b = QPushButton(label)
+            b.setCheckable(True)
+            b.setMinimumHeight(44)
+            b.setStyleSheet("QPushButton:checked { background: #ff8c28; color: white; font-weight: bold; }")
+            b.setProperty("aspect", key)
+            b.setToolTip(ASPECTS[key][0])
+            self.aspect_group.addButton(b)
+            al.addWidget(b)
+        self.aspect_group.buttonClicked.connect(lambda _b: self._store_export())
+        self.size_label = QLabel()
+        self.size_label.setStyleSheet("color: gray")
+        self.size = QComboBox()
+        for key, label in SIZES:
+            self.size.addItem(label, key)
+        self.fit = QComboBox()
+        for key, label in FITS:
+            self.fit.addItem(label, key)
+        self.fit.setToolTip("클립 비율이 화면 비율과 다를 때 (예: 가로 영상을 세로 릴스로)")
         self.fps = QComboBox()
         for f in FPS_CHOICES:
             self.fps.addItem(f"{f:g} fps", f)
         self.quality = QComboBox()
         for label, crf in QUALITIES:
             self.quality.addItem(label, crf)
-        for w in (self.res, self.fps, self.quality):
+        for w in (self.size, self.fit, self.fps, self.quality):
             w.currentIndexChanged.connect(self._store_export)
 
         self.preview_btn = QPushButton("▶ 미리보기 만들기")
@@ -212,13 +240,15 @@ class MainWindow(QMainWindow):
         self.status.setWordWrap(True)
 
         f = QFormLayout(box)
+        f.addRow("화면 비율", aspect_row)
         settings = QWidget()
         sl = QHBoxLayout(settings)
         sl.setContentsMargins(0, 0, 0, 0)
-        sl.addWidget(self.res, 2)
+        sl.addWidget(self.size, 1)
         sl.addWidget(self.fps, 1)
         sl.addWidget(self.quality, 1)
-        f.addRow("화면 크기·화질", settings)
+        f.addRow("해상도·화질", settings)
+        f.addRow("비율이 다른 영상", row_widget(self.fit, self.size_label))
         buttons = QWidget()
         bl = QHBoxLayout(buttons)
         bl.setContentsMargins(0, 0, 0, 0)
@@ -233,25 +263,41 @@ class MainWindow(QMainWindow):
 
     def _load_export_settings(self) -> None:
         ex = self.project.export
-        for w in (self.res, self.fps, self.quality):
+        widgets = (self.size, self.fit, self.fps, self.quality)
+        for w in widgets:
             w.blockSignals(True)
-        i = self.res.findData(f"{ex.width}x{ex.height}")
-        if i < 0:
-            self.res.addItem(f"사용자 지정 ({ex.width}×{ex.height})", f"{ex.width}x{ex.height}")
-            i = self.res.count() - 1
-        self.res.setCurrentIndex(i)
+        found = find_aspect(ex.width, ex.height)
+        aspect, size = found if found else (None, "1080p")
+        # 프리셋에 없는 크기면 모두 해제해야 하므로 잠깐 단일 선택을 끈다
+        self.aspect_group.setExclusive(False)
+        for b in self.aspect_group.buttons():
+            b.setChecked(b.property("aspect") == aspect)
+        self.aspect_group.setExclusive(True)
+        self.size.setCurrentIndex(max(0, self.size.findData(size)))
+        self.fit.setCurrentIndex(max(0, self.fit.findData(ex.fit)))
         self.fps.setCurrentIndex(max(0, self.fps.findData(ex.fps)))
         qi = self.quality.findData(ex.crf)
         self.quality.setCurrentIndex(qi if qi >= 0 else 1)
-        for w in (self.res, self.fps, self.quality):
+        for w in widgets:
             w.blockSignals(False)
+        self._update_size_label()
 
     def _store_export(self) -> None:
         ex = self.project.export
-        ex.width, ex.height = (int(v) for v in self.res.currentData().split("x"))
+        checked = self.aspect_group.checkedButton()
+        if checked is not None:
+            ex.width, ex.height = ASPECTS[checked.property("aspect")][1][self.size.currentData()]
+        ex.fit = self.fit.currentData()
         ex.fps = self.fps.currentData()
         ex.crf = self.quality.currentData()
+        self._update_size_label()
         self._on_changed()
+
+    def _update_size_label(self) -> None:
+        ex = self.project.export
+        found = find_aspect(ex.width, ex.height)
+        name = ASPECTS[found[0]][0] if found else "사용자 지정"
+        self.size_label.setText(f"{name} · {ex.width}×{ex.height}")
 
     # ---------------------------------------------------------------- 상태
     def _on_changed(self) -> None:

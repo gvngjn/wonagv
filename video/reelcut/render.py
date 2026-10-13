@@ -37,16 +37,44 @@ class RenderOptions:
     fps: float
     crf: int = 20
     preset: str = "medium"
+    fit: str = "pad"
 
 
-def normalize_video_filter(w: int, h: int, fps: float, frames: int, duration: float) -> str:
+def fit_graph(src: str, out: str, w: int, h: int, fit: str) -> str:
+    """원본 영상을 w×h 화면에 맞추는 필터 그래프 조각.
+
+    blur: 화면을 꽉 채운 흐린 배경 위에 원본을 비율 그대로 (릴스·쇼츠에서 흔한 방식)
+    crop: 가운데를 기준으로 잘라서 화면을 꽉 채움
+    pad:  비율 그대로 두고 남는 곳은 검은 여백
+    """
+    if fit == "crop":
+        return (f"{src}scale={w}:{h}:force_original_aspect_ratio=increase,"
+                f"crop={w}:{h},setsar=1{out}")
+    if fit == "blur":
+        # 배경은 작게 줄여서 흐리게 한 뒤 키워야 빠르다
+        bw, bh = max(16, w // 8 // 2 * 2), max(16, h // 8 // 2 * 2)
+        # 흐림 반경은 색 평면(가로세로 절반) 크기의 절반을 넘을 수 없다
+        r = max(1, min(6, min(bw, bh) // 4 - 1))
+        return (
+            f"{src}split=2[fg_in][bg_in];"
+            f"[bg_in]scale={bw}:{bh}:force_original_aspect_ratio=increase,crop={bw}:{bh},"
+            f"boxblur={r}:2,scale={w}:{h},setsar=1,eq=brightness=-0.08[bg];"
+            f"[fg_in]scale={w}:{h}:force_original_aspect_ratio=decrease,setsar=1[fg];"
+            f"[bg][fg]overlay=(W-w)/2:(H-h)/2{out}"
+        )
+    return (f"{src}scale={w}:{h}:force_original_aspect_ratio=decrease,"
+            f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1{out}")
+
+
+def normalize_video_graph(w: int, h: int, fps: float, frames: int, duration: float,
+                          fit: str = "pad") -> str:
+    """[0:v] → [v] : 화면 맞추기 + 프레임레이트 + 정확한 프레임 수."""
     return (
-        f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
-        f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,"
-        f"fps={_num(fps)},format=yuv420p,"
+        fit_graph("[0:v]", "[fit]", w, h, fit) + ";"
+        f"[fit]fps={_num(fps)},format=yuv420p,"
         # 원본이 모자라면 마지막 장면을 늘려서라도 정확한 길이로 맞춘다
         f"tpad=stop_mode=clone:stop_duration={_num(duration + 1)},"
-        f"trim=end_frame={frames},setpts=PTS-STARTPTS"
+        f"trim=end_frame={frames},setpts=PTS-STARTPTS[v]"
     )
 
 
@@ -68,7 +96,7 @@ def segment_args(seg: Segment, out_path: str, opt: RenderOptions) -> list[str]:
         args += ["-f", "lavfi", "-i", f"anullsrc=r={AUDIO_SR}:cl=stereo"]
     a_in = "[0:a]" if has_audio else "[1:a]"
     graph = (
-        f"[0:v]{normalize_video_filter(opt.width, opt.height, opt.fps, frames, dur)}[v];"
+        f"{normalize_video_graph(opt.width, opt.height, opt.fps, frames, dur, opt.fit)};"
         f"{a_in}aresample={AUDIO_SR},aformat=sample_fmts=s16:channel_layouts=stereo,"
         f"apad,atrim=end_sample={samples},asetpts=PTS-STARTPTS[a]"
     )
@@ -324,9 +352,9 @@ class Renderer:
             scale = min(1.0, 640 / max(ex.width, ex.height))
             w = max(2, int(ex.width * scale) // 2 * 2)
             h = max(2, int(ex.height * scale) // 2 * 2)
-            opt = RenderOptions(w, h, ex.fps, crf=30, preset="ultrafast")
+            opt = RenderOptions(w, h, ex.fps, crf=30, preset="ultrafast", fit=ex.fit)
         else:
-            opt = RenderOptions(ex.width // 2 * 2, ex.height // 2 * 2, ex.fps, ex.crf, ex.preset)
+            opt = RenderOptions(ex.width // 2 * 2, ex.height // 2 * 2, ex.fps, ex.crf, ex.preset, ex.fit)
 
         # 프레임 단위로 맞춘 실제 길이
         total = sum(max(1, int(round(s.duration * opt.fps))) / opt.fps for s in segments)

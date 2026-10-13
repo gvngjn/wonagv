@@ -89,3 +89,26 @@ def test_final_args_uses_relative_fonts_dir():
     p.subtitles.entries.append(SubtitleEntry(0, 1, "a"))
     args = final_args(p, "list.txt", 5.0, "out.mp4", RenderOptions(640, 360, 30), "subs.srt", "fonts")
     assert "subtitles=subs.srt:charenc=UTF-8:fontsdir=fonts:force_style=" in args[args.index("-filter_complex") + 1]
+
+
+def test_aspect_presets():
+    from reelcut.project import ASPECTS, find_aspect
+
+    assert ASPECTS["9:16"][1]["1080p"] == (1080, 1920)
+    assert ASPECTS["16:9"][1]["1080p"] == (1920, 1080)
+    assert find_aspect(1080, 1920) == ("9:16", "1080p")
+    assert find_aspect(1280, 720) == ("16:9", "720p")
+    assert find_aspect(1000, 500) is None
+    assert Project().export.fit == "blur"
+
+
+def test_segment_args_fit_modes():
+    seg = Segment("v.mp4", 0, 1.0)
+    graphs = {}
+    for fit in ("blur", "crop", "pad"):
+        args = segment_args(seg, "o.mkv", RenderOptions(1080, 1920, 30, fit=fit))
+        graphs[fit] = args[args.index("-filter_complex") + 1]
+    assert "boxblur" in graphs["blur"] and "overlay" in graphs["blur"]
+    assert "force_original_aspect_ratio=increase,crop=1080:1920" in graphs["crop"]
+    assert "pad=1080:1920" in graphs["pad"]
+    assert all("trim=end_frame=30" in g for g in graphs.values())

@@ -111,6 +111,24 @@ class SubtitleSettings:
     source: str = "video"          # video | music
 
 
+# 화면 비율 프리셋: 키 → (이름, {화질: (너비, 높이)})
+ASPECTS = {
+    "16:9": ("유튜브 · 가로 (16:9)", {"720p": (1280, 720), "1080p": (1920, 1080), "4K": (3840, 2160)}),
+    "9:16": ("릴스 · 쇼츠 · 틱톡 · 세로 (9:16)", {"720p": (720, 1280), "1080p": (1080, 1920), "4K": (2160, 3840)}),
+    "1:1": ("정사각형 (1:1)", {"720p": (720, 720), "1080p": (1080, 1080), "4K": (2160, 2160)}),
+    "4:5": ("인스타 피드 (4:5)", {"720p": (720, 900), "1080p": (1080, 1350), "4K": (2160, 2700)}),
+}
+
+
+def find_aspect(width: int, height: int) -> tuple[str, str] | None:
+    """(비율 키, 화질 키) 또는 프리셋에 없으면 None."""
+    for key, (_name, sizes) in ASPECTS.items():
+        for q, wh in sizes.items():
+            if wh == (width, height):
+                return key, q
+    return None
+
+
 @dataclass
 class ExportSettings:
     width: int = 1920
@@ -119,6 +137,7 @@ class ExportSettings:
     crf: int = 20
     preset: str = "medium"
     clip_volume: float = 1.0       # 원본 영상 소리 크기
+    fit: str = "blur"              # 비율이 다른 영상: blur(흐린 배경) | crop(잘라서 채우기) | pad(검은 여백)
     output: str = ""
 
 

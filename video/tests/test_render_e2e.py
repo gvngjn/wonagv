@@ -84,3 +84,15 @@ def test_burn_in_with_font_file(media, tmp_path):
     out = tmp_path / "font.mp4"
     Renderer().render(p, str(out), preview=True)
     assert probe(str(out)).duration == pytest.approx(7.0, abs=0.1)
+
+
+@needs_ffmpeg
+@pytest.mark.parametrize("fit", ["blur", "crop", "pad"])
+def test_vertical_reels_render(media, tmp_path, fit):
+    p = base_project(media)
+    p.export.width, p.export.height, p.export.fit = 180, 320, fit
+    out = tmp_path / f"reels_{fit}.mp4"
+    Renderer().render(p, str(out))
+    info = probe(str(out))
+    assert (info.width, info.height) == (180, 320)
+    assert info.duration == pytest.approx(7.0, abs=0.1)
