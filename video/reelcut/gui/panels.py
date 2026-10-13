@@ -398,6 +398,7 @@ class MusicPanel(QWidget):
         self.order.addItem("파일 번갈아 (컷마다 1→2→3→1…)", "sequential")
         self.order.addItem("파일별로 몰아서 (1번 파일 다 쓰고 2번…)", "grouped")
         self.order.addItem("무작위 (같은 파일 연속 없음)", "random")
+        self.order.addItem("이어서 (예전 방식, 원본 흐름 그대로)", "continuous")
         self.shuffle_btn = QPushButton("다시 섞기")
         self.shuffle_btn.clicked.connect(self._reshuffle)
         self.length_mode = QComboBox()

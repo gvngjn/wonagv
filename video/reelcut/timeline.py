@@ -48,6 +48,7 @@ def beat_sync_segments(clips: list[Clip], boundaries: list[float], order: str = 
     sequential: 컷마다 다음 파일로 (1→2→3→1…), 각 파일의 처음~끝을 고르게 사용
                 ("spread"는 예전 이름, 같은 동작)
     grouped:    한 파일씩 몰아서 (1,1,1…→2,2…), 파일 안에서는 건너뛰며 사용
+    continuous: 예전 방식. 파일을 처음부터 끊김 없이 이어서 자름 (원본 흐름 그대로)
     random:     무작위 파일의 무작위 위치, 같은 파일 연속 없음 (seed로 재현 가능)
     """
     usable = [c for c in clips if c.length > 0.05]
@@ -55,6 +56,24 @@ def beat_sync_segments(clips: list[Clip], boundaries: list[float], order: str = 
         return []
     durations = [b - a for a, b in zip(boundaries, boundaries[1:])]
     segs: list[Segment] = []
+
+    if order == "continuous":
+        # 예전 '차례대로': 클립을 처음부터 끊김 없이 이어서 자르고, 다 쓰면 다음 클립
+        ci = 0
+        pos = usable[0].in_point
+        for d in durations:
+            c = usable[ci]
+            if pos + d > c.end + 1e-6:
+                # 남은 부분이 컷 길이보다 짧으면 다음 클립으로 (모두 쓰면 처음부터 다시)
+                for _ in range(len(usable)):
+                    ci = (ci + 1) % len(usable)
+                    c = usable[ci]
+                    pos = c.in_point
+                    if c.length >= d:
+                        break
+            segs.append(Segment(c.path, pos, d, c.has_audio))
+            pos += d
+        return segs
 
     if order == "random":
         rng = random.Random(seed)

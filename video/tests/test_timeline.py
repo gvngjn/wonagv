@@ -32,7 +32,7 @@ def test_cut_boundaries_respects_music_start():
     assert b == [0.0, 0.5, 1.5, 2.5, 3.0]
 
 
-@pytest.mark.parametrize("order", ["sequential", "spread", "grouped", "random"])
+@pytest.mark.parametrize("order", ["sequential", "spread", "grouped", "random", "continuous"])
 def test_beat_sync_fills_every_cut_within_clip_ranges(order):
     bounds = [i * 0.5 for i in range(41)]          # 20초, 컷 40개
     segs = beat_sync_segments(clips(), bounds, order, seed=3)
@@ -98,3 +98,9 @@ def test_clip_length_mode_never_exceeds_music():
     segs = build_segments(p)
     assert total_duration(segs) == pytest.approx(240.0, abs=0.05)
     assert max(s.duration for s in segs) < 1.0         # 음악 끝난 뒤 긴 덩어리가 없어야 함
+
+
+def test_continuous_keeps_original_flow():
+    segs = beat_sync_segments(clips(), [0, 4, 8, 12, 14], "continuous")
+    assert [(s.path, s.src_start) for s in segs] == [
+        ("a.mp4", 0.0), ("a.mp4", 4.0), ("b.mp4", 1.0), ("c.mp4", 0.0)]
