@@ -199,6 +199,8 @@ class MusicPreviewPlayer:
             self._player = QMediaPlayer(self._parent)
             self._audio = QAudioOutput(self._parent)
             self._player.setAudioOutput(self._audio)
+            from .audio_devices import AudioDeviceManager
+            AudioDeviceManager.instance().register(self._audio)
             self._player.positionChanged.connect(self._pos)
             self._player.mediaStatusChanged.connect(self._status)
             self._player.playbackStateChanged.connect(self._state)

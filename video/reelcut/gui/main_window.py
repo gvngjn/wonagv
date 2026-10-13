@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 
 from .. import __version__
 from ..project import ASPECTS, Project, find_aspect
+from .audio_devices import AudioDeviceManager, AudioOutputPicker
 from .panels import ClipsPanel, MusicPanel, PipPanel, SubtitlePanel, fmt_time
 from .panels import row as row_widget
 from .workers import TaskThread
@@ -45,6 +46,7 @@ class Preview(QWidget):
         self.player = QMediaPlayer(self)
         self.audio = QAudioOutput(self)
         self.player.setAudioOutput(self.audio)
+        AudioDeviceManager.instance().register(self.audio)
         self.video = QVideoWidget()
         self.video.setMinimumSize(320, 180)
         self.video.setStyleSheet("background: black")
@@ -67,6 +69,7 @@ class Preview(QWidget):
         ctl.addWidget(self.play_btn)
         ctl.addWidget(self.slider, 1)
         ctl.addWidget(self.time)
+        ctl.addWidget(AudioOutputPicker())
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.addWidget(self.video, 1)
