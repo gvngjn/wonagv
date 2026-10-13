@@ -45,9 +45,10 @@ def beat_sync_segments(clips: list[Clip], boundaries: list[float], order: str = 
                        seed: int = 7) -> list[Segment]:
     """컷 길이(boundaries 간격)에 맞게 클립에서 조각을 골라낸다.
 
-    sequential: 클립을 앞에서부터 차례로 잘라 쓰고, 다 쓰면 다음 클립 (모두 쓰면 처음부터 다시)
-    spread:     클립을 번갈아 가며, 각 클립의 처음~끝을 고르게 사용
-    random:     무작위 클립의 무작위 위치 (seed로 재현 가능)
+    sequential: 컷마다 다음 파일로 (1→2→3→1…), 각 파일의 처음~끝을 고르게 사용
+                ("spread"는 예전 이름, 같은 동작)
+    grouped:    한 파일씩 몰아서 (1,1,1…→2,2…), 파일 안에서는 건너뛰며 사용
+    random:     무작위 파일의 무작위 위치, 같은 파일 연속 없음 (seed로 재현 가능)
     """
     usable = [c for c in clips if c.length > 0.05]
     if not usable or len(boundaries) < 2:
@@ -67,7 +68,7 @@ def beat_sync_segments(clips: list[Clip], boundaries: list[float], order: str = 
             segs.append(Segment(c.path, start, d, c.has_audio))
         return segs
 
-    if order == "spread":
+    if order in ("sequential", "spread"):
         # 클립별로 몇 번 쓰일지 정하고, 그 횟수만큼 클립 구간을 등분해서 사용
         counts = [0] * len(usable)
         for i in range(len(durations)):
@@ -84,7 +85,7 @@ def beat_sync_segments(clips: list[Clip], boundaries: list[float], order: str = 
             segs.append(Segment(c.path, start, d, c.has_audio))
         return segs
 
-    # sequential: 클립 순서대로, 클립마다 길이에 비례한 개수의 컷을 고르게 떨어진 위치에서 뽑는다.
+    # grouped: 한 파일씩 몰아서. 클립마다 길이에 비례한 개수의 컷을 고르게 떨어진 위치에서 뽑는다.
     # (바로 이어지는 구간을 쓰면 컷이 바뀌어도 화면이 이어져 보여서 장면 전환이 안 느껴진다)
     counts = _allocate(durations, usable)
     order = [k for k, n in enumerate(counts) for _ in range(n)]

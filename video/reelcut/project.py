@@ -79,7 +79,7 @@ class MusicSettings:
 class BeatSyncSettings:
     enabled: bool = False
     beats_per_cut: int = 2         # 몇 비트마다 화면을 바꿀지
-    order: str = "sequential"      # sequential | spread | random
+    order: str = "sequential"      # sequential(번갈아) | grouped(파일별 몰아서) | random
     seed: int = 7
     use_music_length: bool = True  # 음악 길이만큼 만들기 (아니면 클립을 다 쓸 때까지)
     max_duration: float = 0.0      # 0이면 제한 없음

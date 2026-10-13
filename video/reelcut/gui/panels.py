@@ -395,9 +395,9 @@ class MusicPanel(QWidget):
         for n in (1, 2, 4, 8, 16):
             self.per_cut.addItem(f"{n}비트마다", n)
         self.order = QComboBox()
-        self.order.addItem("차례대로 (클립 순서대로 이어서)", "sequential")
-        self.order.addItem("골고루 (각 클립에서 고르게)", "spread")
-        self.order.addItem("무작위", "random")
+        self.order.addItem("파일 번갈아 (컷마다 1→2→3→1…)", "sequential")
+        self.order.addItem("파일별로 몰아서 (1번 파일 다 쓰고 2번…)", "grouped")
+        self.order.addItem("무작위 (같은 파일 연속 없음)", "random")
         self.shuffle_btn = QPushButton("다시 섞기")
         self.shuffle_btn.clicked.connect(self._reshuffle)
         self.length_mode = QComboBox()
@@ -443,7 +443,7 @@ class MusicPanel(QWidget):
         self.offset_spin.setValue(m.beat_offset)
         self.sync_check.setChecked(bs.enabled)
         self.per_cut.setCurrentIndex(max(0, self.per_cut.findData(bs.beats_per_cut)))
-        self.order.setCurrentIndex(max(0, self.order.findData(bs.order)))
+        self.order.setCurrentIndex(max(0, self.order.findData("sequential" if bs.order == "spread" else bs.order)))
         self.length_mode.setCurrentIndex(0 if bs.use_music_length else 1)
         self.max_spin.setValue(bs.max_duration)
         self._loading = False

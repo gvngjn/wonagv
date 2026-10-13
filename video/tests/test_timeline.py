@@ -32,7 +32,7 @@ def test_cut_boundaries_respects_music_start():
     assert b == [0.0, 0.5, 1.5, 2.5, 3.0]
 
 
-@pytest.mark.parametrize("order", ["sequential", "spread", "random"])
+@pytest.mark.parametrize("order", ["sequential", "spread", "grouped", "random"])
 def test_beat_sync_fills_every_cut_within_clip_ranges(order):
     bounds = [i * 0.5 for i in range(41)]          # 20초, 컷 40개
     segs = beat_sync_segments(clips(), bounds, order, seed=3)
@@ -44,9 +44,16 @@ def test_beat_sync_fills_every_cut_within_clip_ranges(order):
         assert s.src_start + s.duration <= c.end + 1e-9
 
 
-def test_sequential_walks_through_clips_in_order():
-    segs = beat_sync_segments(clips(), [0, 4, 8, 12, 14], "sequential")
-    # 클립 길이(10, 4, 3)에 비례해서 컷 배분, 순서는 클립 순서대로
+def test_sequential_alternates_files_every_cut():
+    segs = beat_sync_segments(clips(), [i * 0.5 for i in range(13)], "sequential")
+    assert [s.path for s in segs] == ["a.mp4", "b.mp4", "c.mp4"] * 4
+    # 같은 파일 안에서는 앞에서 뒤로 고르게 진행
+    a_starts = [s.src_start for s in segs if s.path == "a.mp4"]
+    assert a_starts == sorted(a_starts) and a_starts[-1] > 5
+
+
+def test_grouped_uses_one_file_at_a_time():
+    segs = beat_sync_segments(clips(), [0, 4, 8, 12, 14], "grouped")
     assert [s.path for s in segs] == ["a.mp4", "a.mp4", "b.mp4", "c.mp4"]
     assert segs[0].src_start < segs[1].src_start
 
@@ -56,6 +63,7 @@ def test_sequential_cuts_jump_instead_of_continuing():
     long_clip = [Clip("concert.mp4", 850.0)]
     bounds = [i * 0.857 for i in range(281)]          # 140BPM 2비트마다, 4분
     segs = beat_sync_segments(long_clip, bounds, "sequential")
+    assert segs == beat_sync_segments(long_clip, bounds, "grouped")
     assert len(segs) == 280
     gaps = [b.src_start - (a.src_start + a.duration) for a, b in zip(segs, segs[1:])]
     assert min(gaps) > 1.0                             # 매 컷마다 1초 넘게 건너뜀
