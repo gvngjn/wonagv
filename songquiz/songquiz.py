@@ -59,7 +59,8 @@ def write_playlist(rows):
 def split_youtube_title(raw, uploader):
     """'가수 - 제목 (Official MV)' 꼴을 최대한 나눠 본다. 틀리면 CSV 에서 고치면 됨."""
     t = re.sub(r"[\(\[](official|m/?v|music video|lyrics?|audio|가사|공식)[^\)\]]*[\)\]]", "",
-               raw, flags=re.I).strip()
+               raw, flags=re.I)
+    t = re.sub(r"\s*(official\s*)?(m/?v|music video|lyric video|audio)\s*$", "", t, flags=re.I).strip()
     for sep in (" - ", " – ", " — "):
         if sep in t:
             artist, title = t.split(sep, 1)
