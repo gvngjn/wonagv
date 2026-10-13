@@ -1,0 +1,55 @@
+name: 영상 편집기 빌드
+
+on:
+  push:
+    paths:
+      - "video/**"
+      - ".github/workflows/video.yml"
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: ffmpeg 설치
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: 테스트 도구 설치
+        run: pip install numpy pytest
+      - name: 단위·통합 테스트
+        run: python -m pytest -q video/tests
+
+  build:
+    runs-on: windows-latest
+    needs: test
+    defaults:
+      run:
+        working-directory: video
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 패키지 설치
+        run: pip install -r requirements.txt pyinstaller
+      - name: 실행 파일 만들기
+        run: >
+          pyinstaller --noconfirm --windowed --name ReelCut
+          --collect-all faster_whisper --collect-all ctranslate2
+          run_reelcut.py
+      - name: FFmpeg 함께 넣기
+        shell: pwsh
+        run: |
+          $url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n7.1-latest-win64-gpl-7.1.zip"
+          Invoke-WebRequest $url -OutFile ffmpeg.zip
+          Expand-Archive ffmpeg.zip -DestinationPath ffmpeg_tmp
+          New-Item -ItemType Directory -Force dist/ReelCut/ffmpeg | Out-Null
+          Get-ChildItem ffmpeg_tmp -Recurse -Include ffmpeg.exe,ffprobe.exe | Copy-Item -Destination dist/ReelCut/ffmpeg
+          if (-not (Test-Path dist/ReelCut/ffmpeg/ffmpeg.exe)) { throw "ffmpeg.exe 를 찾지 못함" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ReelCut-win-x64
+          path: video/dist/ReelCut

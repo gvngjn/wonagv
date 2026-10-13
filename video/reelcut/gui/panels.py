@@ -1,0 +1,912 @@
+"""왼쪽 탭에 들어가는 편집 패널들."""
+from __future__ import annotations
+
+from pathlib import Path
+
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtWidgets import (
+    QAbstractItemView, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFontComboBox,
+    QFormLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QListWidget, QListWidgetItem,
+    QMessageBox, QPushButton, QSizePolicy, QSlider, QSpinBox, QTableWidget, QTableWidgetItem,
+    QVBoxLayout, QWidget,
+)
+
+from .. import subtitles as subs
+from ..ffmpeg import probe
+from ..project import Clip, PipOverlay, Project, SubtitleEntry
+from ..render import is_image
+
+VIDEO_FILTER = "영상·사진 (*.mp4 *.mov *.mkv *.avi *.webm *.m4v *.wmv *.jpg *.jpeg *.png *.bmp *.webp);;모든 파일 (*)"
+AUDIO_FILTER = "음악 (*.mp3 *.wav *.m4a *.aac *.flac *.ogg *.opus *.wma *.mp4);;모든 파일 (*)"
+IMAGE_DEFAULT_SECONDS = 3.0
+
+
+def fmt_time(sec: float) -> str:
+    sec = max(0.0, sec)
+    m, s = divmod(sec, 60)
+    return f"{int(m)}:{s:04.1f}"
+
+
+def seconds_spin(maximum: float = 36000.0, step: float = 0.1, decimals: int = 2) -> QDoubleSpinBox:
+    s = QDoubleSpinBox()
+    s.setRange(0.0, maximum)
+    s.setDecimals(decimals)
+    s.setSingleStep(step)
+    s.setSuffix(" 초")
+    s.setKeyboardTracking(False)
+    return s
+
+
+def percent_slider(maximum: int = 200) -> tuple[QSlider, QLabel]:
+    sl = QSlider(Qt.Horizontal)
+    sl.setRange(0, maximum)
+    lbl = QLabel()
+    lbl.setMinimumWidth(42)
+    lbl.setText("0%")
+    sl.valueChanged.connect(lambda v: lbl.setText(f"{v}%"))
+    return sl, lbl
+
+
+def row(*widgets) -> QWidget:
+    w = QWidget()
+    h = QHBoxLayout(w)
+    h.setContentsMargins(0, 0, 0, 0)
+    for x in widgets:
+        if isinstance(x, int):
+            h.addSpacing(x)
+        elif x is None:
+            h.addStretch(1)
+        else:
+            h.addWidget(x)
+    return w
+
+
+def make_clip(path: str) -> Clip:
+    if is_image(path):
+        return Clip(path, duration=0.0, in_point=0.0, out_point=IMAGE_DEFAULT_SECONDS, has_audio=False)
+    info = probe(path)
+    if not info.has_video:
+        raise ValueError(f"영상이 없는 파일이에요: {Path(path).name}")
+    return Clip(path, info.duration, 0.0, 0.0, info.has_audio, info.width, info.height)
+
+
+# ------------------------------------------------------------------ 클립
+
+class ClipsPanel(QWidget):
+    changed = Signal()
+    preview_requested = Signal(str, float)   # 경로, 시작 위치
+
+    def __init__(self, project: Project, player_position) -> None:
+        super().__init__()
+        self.project = project
+        self._player_position = player_position   # () -> 현재 미리보기 재생 위치(초)
+        self._loading = False
+
+        self.list = QListWidget()
+        self.list.setDragDropMode(QAbstractItemView.InternalMove)
+        self.list.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.list.model().rowsMoved.connect(self._sync_order)
+        self.list.currentRowChanged.connect(self._on_select)
+
+        add = QPushButton("＋ 클립 추가")
+        add.clicked.connect(self.add_dialog)
+        remove = QPushButton("삭제")
+        remove.clicked.connect(self.remove_selected)
+        up = QPushButton("▲")
+        up.clicked.connect(lambda: self.move(-1))
+        down = QPushButton("▼")
+        down.clicked.connect(lambda: self.move(1))
+        for b in (up, down):
+            b.setFixedWidth(36)
+
+        self.total_label = QLabel()
+
+        # 선택한 클립 자르기
+        self.edit_box = QGroupBox("선택한 클립 자르기")
+        self.in_spin = seconds_spin()
+        self.out_spin = seconds_spin()
+        self.in_spin.valueChanged.connect(self._on_trim)
+        self.out_spin.valueChanged.connect(self._on_trim)
+        set_in = QPushButton("현재 위치")
+        set_in.setToolTip("미리보기의 현재 재생 위치를 시작점으로")
+        set_in.clicked.connect(lambda: self.in_spin.setValue(self._player_position()))
+        set_out = QPushButton("현재 위치")
+        set_out.setToolTip("미리보기의 현재 재생 위치를 끝점으로")
+        set_out.clicked.connect(lambda: self.out_spin.setValue(self._player_position()))
+        reset = QPushButton("자르기 취소")
+        reset.clicked.connect(self._reset_trim)
+        self.clip_info = QLabel()
+        self.clip_info.setWordWrap(True)
+        form = QFormLayout(self.edit_box)
+        form.addRow("시작", row(self.in_spin, set_in))
+        form.addRow("끝", row(self.out_spin, set_out))
+        form.addRow(row(self.clip_info, None, reset))
+        self.edit_box.setEnabled(False)
+
+        hint = QLabel("파일을 창에 끌어다 놓아도 추가돼요. 목록을 끌어서 순서를 바꿀 수 있어요.")
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: gray")
+
+        lay = QVBoxLayout(self)
+        lay.addWidget(row(add, remove, None, up, down))
+        lay.addWidget(self.list, 1)
+        lay.addWidget(self.total_label)
+        lay.addWidget(self.edit_box)
+        lay.addWidget(hint)
+        self.reload()
+
+    # --- 목록 ---
+    def reload(self) -> None:
+        self._loading = True
+        cur = self.list.currentRow()
+        self.list.clear()
+        for c in self.project.clips:
+            item = QListWidgetItem()
+            item.setData(Qt.UserRole, c)
+            self._label(item)
+            self.list.addItem(item)
+        self._loading = False
+        if self.project.clips:
+            self.list.setCurrentRow(min(max(cur, 0), len(self.project.clips) - 1))
+        else:
+            self._on_select(-1)
+        self._update_total()
+
+    def _label(self, item: QListWidgetItem) -> None:
+        c: Clip = item.data(Qt.UserRole)
+        kind = "🖼" if is_image(c.path) else ("🎬" if c.has_audio else "🎬🔇")
+        trimmed = " ✂" if (c.in_point > 0 or (c.out_point > 0 and c.duration and c.out_point < c.duration)) else ""
+        item.setText(f"{kind} {c.name}   {fmt_time(c.length)}{trimmed}")
+
+    def add_files(self, paths: list[str]) -> None:
+        errors = []
+        for p in paths:
+            try:
+                self.project.clips.append(make_clip(p))
+            except Exception as e:
+                errors.append(str(e))
+        self.reload()
+        self.list.setCurrentRow(len(self.project.clips) - 1)
+        self.changed.emit()
+        if errors:
+            QMessageBox.warning(self, "추가하지 못한 파일", "\n".join(errors))
+
+    def add_dialog(self) -> None:
+        paths, _ = QFileDialog.getOpenFileNames(self, "클립 추가", "", VIDEO_FILTER)
+        if paths:
+            self.add_files(paths)
+
+    def remove_selected(self) -> None:
+        r = self.list.currentRow()
+        if r >= 0:
+            del self.project.clips[r]
+            self.reload()
+            self.changed.emit()
+
+    def move(self, delta: int) -> None:
+        r = self.list.currentRow()
+        n = r + delta
+        if r < 0 or not (0 <= n < len(self.project.clips)):
+            return
+        clips = self.project.clips
+        clips[r], clips[n] = clips[n], clips[r]
+        self.reload()
+        self.list.setCurrentRow(n)
+        self.changed.emit()
+
+    def _sync_order(self, *args) -> None:
+        self.project.clips[:] = [self.list.item(i).data(Qt.UserRole) for i in range(self.list.count())]
+        self._update_total()
+        self.changed.emit()
+
+    def _update_total(self) -> None:
+        total = sum(c.length for c in self.project.clips)
+        self.total_label.setText(f"클립 {len(self.project.clips)}개 · 이어붙인 길이 {fmt_time(total)}")
+
+    # --- 자르기 ---
+    def current_clip(self) -> Clip | None:
+        item = self.list.currentItem()
+        return item.data(Qt.UserRole) if item else None
+
+    def _on_select(self, r: int) -> None:
+        c = self.current_clip() if r >= 0 else None
+        self.edit_box.setEnabled(c is not None)
+        if not c:
+            self.clip_info.setText("")
+            return
+        self._loading = True
+        limit = c.duration if c.duration > 0 else 3600.0
+        self.in_spin.setMaximum(limit)
+        self.out_spin.setMaximum(limit)
+        self.in_spin.setValue(c.in_point)
+        self.out_spin.setValue(c.end)
+        self._loading = False
+        self._update_info(c)
+        if not is_image(c.path):
+            self.preview_requested.emit(c.path, c.in_point)
+
+    def _update_info(self, c: Clip) -> None:
+        if is_image(c.path):
+            self.clip_info.setText(f"사진 · {fmt_time(c.length)} 동안 표시")
+        else:
+            size = f"{c.width}×{c.height} · " if c.width else ""
+            self.clip_info.setText(f"{size}원본 {fmt_time(c.duration)} → 사용 {fmt_time(c.length)}")
+
+    def _on_trim(self) -> None:
+        if self._loading:
+            return
+        c = self.current_clip()
+        if not c:
+            return
+        a, b = self.in_spin.value(), self.out_spin.value()
+        if b <= a + 0.05:
+            b = a + 0.1
+            self._loading = True
+            self.out_spin.setValue(b)
+            self._loading = False
+        c.in_point = a
+        c.out_point = 0.0 if (c.duration and b >= c.duration - 1e-3) else b
+        self._label(self.list.currentItem())
+        self._update_info(c)
+        self._update_total()
+        self.changed.emit()
+
+    def _reset_trim(self) -> None:
+        c = self.current_clip()
+        if not c:
+            return
+        c.in_point = 0.0
+        c.out_point = IMAGE_DEFAULT_SECONDS if is_image(c.path) else 0.0
+        self._on_select(self.list.currentRow())
+        self._label(self.list.currentItem())
+        self._update_total()
+        self.changed.emit()
+
+
+# ------------------------------------------------------------------ 음악·비트
+
+class BeatStrip(QWidget):
+    """음악 비트(얇은 선)와 실제 컷 위치(굵은 선)를 보여주는 띠."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setMinimumHeight(46)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.beats: list[float] = []
+        self.cuts: list[float] = []
+        self.length = 0.0
+
+    def set_data(self, beats: list[float], cuts: list[float], length: float) -> None:
+        self.beats, self.cuts, self.length = beats, cuts, length
+        self.update()
+
+    def paintEvent(self, _e) -> None:
+        p = QPainter(self)
+        r = self.rect().adjusted(0, 0, -1, -1)
+        p.fillRect(r, self.palette().base())
+        p.setPen(self.palette().mid().color())
+        p.drawRect(r)
+        if self.length <= 0:
+            p.setPen(self.palette().placeholderText().color())
+            p.drawText(r, Qt.AlignCenter, "음악을 등록하고 분석하면 비트가 여기에 표시돼요")
+            return
+        w = r.width()
+
+        def x(t: float) -> int:
+            return int(r.left() + t / self.length * w)
+
+        p.setPen(QPen(QColor(130, 130, 130, 140), 1))
+        for b in self.beats:
+            if 0 <= b <= self.length:
+                p.drawLine(x(b), r.top() + 14, x(b), r.bottom() - 2)
+        p.setPen(QPen(QColor(255, 120, 40), 2))
+        for c in self.cuts:
+            p.drawLine(x(c), r.top() + 2, x(c), r.bottom() - 2)
+
+
+class MusicPanel(QWidget):
+    changed = Signal()
+    analyze_requested = Signal()
+
+    def __init__(self, project: Project) -> None:
+        super().__init__()
+        self.project = project
+        self._loading = False
+
+        # 음악 등록
+        music_box = QGroupBox("음악 등록")
+        self.file_label = QLabel("등록된 음악 없음")
+        self.file_label.setWordWrap(True)
+        pick = QPushButton("음악 선택…")
+        pick.clicked.connect(self.pick_music)
+        clear = QPushButton("빼기")
+        clear.clicked.connect(self.clear_music)
+        self.start_spin = seconds_spin()
+        self.vol_slider, vol_lbl = percent_slider(200)
+        self.fade_spin = seconds_spin(30, 0.5, 1)
+        self.clip_vol_slider, clip_vol_lbl = percent_slider(200)
+        mf = QFormLayout(music_box)
+        mf.addRow(row(self.file_label, None, pick, clear))
+        mf.addRow("음악 시작 위치", self.start_spin)
+        mf.addRow("음악 소리", row(self.vol_slider, vol_lbl))
+        mf.addRow("끝 페이드아웃", self.fade_spin)
+        mf.addRow("영상 원본 소리", row(self.clip_vol_slider, clip_vol_lbl))
+
+        # 비트 분석
+        beat_box = QGroupBox("템포·비트")
+        self.analyze_btn = QPushButton("🎵 비트 분석")
+        self.analyze_btn.clicked.connect(self.analyze_requested.emit)
+        self.bpm_spin = QDoubleSpinBox()
+        self.bpm_spin.setRange(0, 300)
+        self.bpm_spin.setDecimals(1)
+        self.bpm_spin.setSuffix(" BPM")
+        self.bpm_spin.setKeyboardTracking(False)
+        apply_bpm = QPushButton("이 BPM으로 맞추기")
+        apply_bpm.setToolTip("분석이 틀렸을 때 BPM을 직접 입력해서 일정한 간격의 비트로 바꿔요")
+        apply_bpm.clicked.connect(self.apply_manual_bpm)
+        dbl = QPushButton("×2")
+        dbl.clicked.connect(lambda: self._scale_bpm(2.0))
+        half = QPushButton("÷2")
+        half.clicked.connect(lambda: self._scale_bpm(0.5))
+        for b in (dbl, half):
+            b.setFixedWidth(40)
+        self.offset_spin = QDoubleSpinBox()
+        self.offset_spin.setRange(-2, 2)
+        self.offset_spin.setDecimals(3)
+        self.offset_spin.setSingleStep(0.01)
+        self.offset_spin.setSuffix(" 초")
+        self.offset_spin.setKeyboardTracking(False)
+        self.beat_info = QLabel()
+        bf = QFormLayout(beat_box)
+        bf.addRow(row(self.analyze_btn, None, self.beat_info))
+        bf.addRow("템포", row(self.bpm_spin, dbl, half, apply_bpm))
+        bf.addRow("비트 위치 조정", self.offset_spin)
+
+        # 비트 맞춤 컷
+        sync_box = QGroupBox("노래 비트에 맞춰 잘라 이어붙이기")
+        self.sync_check = QCheckBox("사용하기 (클립을 비트마다 잘라서 화면 전환)")
+        self.per_cut = QComboBox()
+        for n in (1, 2, 4, 8, 16):
+            self.per_cut.addItem(f"{n}비트마다", n)
+        self.order = QComboBox()
+        self.order.addItem("차례대로 (클립 순서대로 이어서)", "sequential")
+        self.order.addItem("골고루 (각 클립에서 고르게)", "spread")
+        self.order.addItem("무작위", "random")
+        self.shuffle_btn = QPushButton("다시 섞기")
+        self.shuffle_btn.clicked.connect(self._reshuffle)
+        self.length_mode = QComboBox()
+        self.length_mode.addItem("음악 길이만큼", True)
+        self.length_mode.addItem("클립 길이만큼", False)
+        self.max_spin = seconds_spin(36000, 1, 0)
+        self.max_spin.setSpecialValueText("제한 없음")
+        self.strip = BeatStrip()
+        self.cut_info = QLabel()
+        sf = QFormLayout(sync_box)
+        sf.addRow(self.sync_check)
+        sf.addRow("화면 전환", self.per_cut)
+        sf.addRow("클립 고르는 방식", row(self.order, self.shuffle_btn))
+        sf.addRow("영상 길이", row(self.length_mode, QLabel("최대"), self.max_spin))
+        sf.addRow(self.strip)
+        sf.addRow(self.cut_info)
+
+        lay = QVBoxLayout(self)
+        lay.addWidget(music_box)
+        lay.addWidget(beat_box)
+        lay.addWidget(sync_box)
+        lay.addStretch(1)
+
+        for w in (self.start_spin, self.fade_spin, self.offset_spin, self.max_spin):
+            w.valueChanged.connect(self._store)
+        for w in (self.vol_slider, self.clip_vol_slider):
+            w.valueChanged.connect(self._store)
+        self.bpm_spin.valueChanged.connect(self._store)
+        self.sync_check.toggled.connect(self._store)
+        for w in (self.per_cut, self.order, self.length_mode):
+            w.currentIndexChanged.connect(self._store)
+        self.reload()
+
+    def reload(self) -> None:
+        self._loading = True
+        m, bs, ex = self.project.music, self.project.beat_sync, self.project.export
+        self.file_label.setText(f"🎵 {Path(m.path).name}  ({fmt_time(m.duration)})" if m.path else "등록된 음악 없음")
+        self.start_spin.setValue(m.start)
+        self.vol_slider.setValue(int(round(m.volume * 100)))
+        self.fade_spin.setValue(m.fade_out)
+        self.clip_vol_slider.setValue(int(round(ex.clip_volume * 100)))
+        self.bpm_spin.setValue(m.bpm)
+        self.offset_spin.setValue(m.beat_offset)
+        self.sync_check.setChecked(bs.enabled)
+        self.per_cut.setCurrentIndex(max(0, self.per_cut.findData(bs.beats_per_cut)))
+        self.order.setCurrentIndex(max(0, self.order.findData(bs.order)))
+        self.length_mode.setCurrentIndex(0 if bs.use_music_length else 1)
+        self.max_spin.setValue(bs.max_duration)
+        self._loading = False
+        self._refresh_info()
+
+    def _store(self) -> None:
+        if self._loading:
+            return
+        m, bs, ex = self.project.music, self.project.beat_sync, self.project.export
+        m.start = self.start_spin.value()
+        m.volume = self.vol_slider.value() / 100
+        m.fade_out = self.fade_spin.value()
+        m.bpm = self.bpm_spin.value()
+        m.beat_offset = self.offset_spin.value()
+        ex.clip_volume = self.clip_vol_slider.value() / 100
+        was = bs.enabled
+        bs.enabled = self.sync_check.isChecked()
+        bs.beats_per_cut = self.per_cut.currentData()
+        bs.order = self.order.currentData()
+        bs.use_music_length = bool(self.length_mode.currentData())
+        bs.max_duration = self.max_spin.value()
+        if bs.enabled and not was and ex.clip_volume >= 1.0:
+            # 비트 맞춤 영상은 보통 음악만 들리게 한다
+            self.clip_vol_slider.setValue(0)
+            return
+        self._refresh_info()
+        self.changed.emit()
+
+    def _refresh_info(self) -> None:
+        from ..timeline import build_segments, segment_starts, total_duration
+
+        m = self.project.music
+        self.shuffle_btn.setEnabled(self.project.beat_sync.order == "random")
+        if m.beats:
+            self.beat_info.setText(f"비트 {len(m.beats)}개 · 약 {m.bpm:.1f} BPM")
+        else:
+            self.beat_info.setText("아직 분석 전" if m.path else "")
+        self.analyze_btn.setEnabled(bool(m.path))
+        if not m.path:
+            self.strip.set_data([], [], 0)
+            self.cut_info.setText("")
+            return
+        segs = build_segments(self.project)
+        length = max(total_duration(segs), 0.0)
+        cuts = segment_starts(segs)[1:] if self.project.beat_sync.enabled else []
+        view_len = length if length > 0 else max(0.0, m.duration - m.start)
+        beats_rel = [b + m.beat_offset - m.start for b in m.beats]
+        self.strip.set_data(beats_rel, cuts, view_len)
+        if self.project.beat_sync.enabled:
+            if not m.beats:
+                self.cut_info.setText("먼저 '비트 분석'을 눌러 주세요.")
+            elif not self.project.clips:
+                self.cut_info.setText("클립 탭에서 영상을 추가해 주세요.")
+            else:
+                self.cut_info.setText(f"컷 {len(segs)}개 · 완성 길이 {fmt_time(length)}")
+        else:
+            self.cut_info.setText("꺼져 있으면 음악은 배경음으로만 깔려요.")
+
+    def pick_music(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "음악 선택", "", AUDIO_FILTER)
+        if not path:
+            return
+        try:
+            info = probe(path)
+        except Exception as e:
+            QMessageBox.warning(self, "음악", str(e))
+            return
+        if not info.has_audio:
+            QMessageBox.warning(self, "음악", "소리가 없는 파일이에요.")
+            return
+        m = self.project.music
+        m.path, m.duration, m.start, m.bpm, m.beats, m.beat_offset = path, info.duration, 0.0, 0.0, [], 0.0
+        self.reload()
+        self.changed.emit()
+        self.analyze_requested.emit()
+
+    def clear_music(self) -> None:
+        from ..project import MusicSettings
+
+        self.project.music = MusicSettings()
+        self.project.beat_sync.enabled = False
+        self.reload()
+        self.changed.emit()
+
+    def set_beats(self, bpm: float, beats: list[float]) -> None:
+        self.project.music.bpm = bpm
+        self.project.music.beats = beats
+        self.reload()
+        self.changed.emit()
+
+    def apply_manual_bpm(self) -> None:
+        from ..beats import grid_beats
+
+        m = self.project.music
+        bpm = self.bpm_spin.value()
+        if bpm <= 0 or not m.path:
+            return
+        first = m.beats[0] if m.beats else 0.0
+        step = 60.0 / bpm
+        first = first % step
+        self.set_beats(bpm, grid_beats(bpm, first, m.duration))
+
+    def _scale_bpm(self, factor: float) -> None:
+        m = self.project.music
+        if m.bpm <= 0:
+            return
+        if factor == 0.5 and len(m.beats) >= 2:
+            # 하나 걸러 하나만 남기기
+            self.set_beats(round(m.bpm / 2, 1), m.beats[::2])
+        elif factor == 2.0 and len(m.beats) >= 2:
+            mids = [(a + b) / 2 for a, b in zip(m.beats, m.beats[1:])]
+            merged = sorted(m.beats + mids)
+            self.set_beats(round(m.bpm * 2, 1), merged)
+
+    def _reshuffle(self) -> None:
+        self.project.beat_sync.seed += 1
+        self._refresh_info()
+        self.changed.emit()
+
+
+# ------------------------------------------------------------------ 화면 속 화면
+
+POSITION_LABELS = [
+    ("오른쪽 아래", "bottom-right"), ("오른쪽 위", "top-right"), ("왼쪽 아래", "bottom-left"),
+    ("왼쪽 위", "top-left"), ("가운데", "center"), ("직접 지정", "custom"),
+]
+BORDER_COLORS = [("흰색", "white"), ("검정", "black"), ("노랑", "yellow"), ("빨강", "red")]
+
+
+class PipPanel(QWidget):
+    changed = Signal()
+
+    def __init__(self, project: Project) -> None:
+        super().__init__()
+        self.project = project
+        self._loading = False
+        self.list = QListWidget()
+        self.list.currentRowChanged.connect(self._on_select)
+        add = QPushButton("＋ 작은 화면 추가")
+        add.clicked.connect(self.add_dialog)
+        remove = QPushButton("삭제")
+        remove.clicked.connect(self.remove_selected)
+
+        self.box = QGroupBox("선택한 작은 화면")
+        self.pos = QComboBox()
+        for label, key in POSITION_LABELS:
+            self.pos.addItem(label, key)
+        self.x_spin = QDoubleSpinBox()
+        self.y_spin = QDoubleSpinBox()
+        for s in (self.x_spin, self.y_spin):
+            s.setRange(0, 100)
+            s.setSuffix(" %")
+            s.setDecimals(1)
+            s.setKeyboardTracking(False)
+        self.size_slider, size_lbl = percent_slider(100)
+        self.size_slider.setMinimum(5)
+        self.start_spin = seconds_spin()
+        self.dur_spin = seconds_spin()
+        self.dur_spin.setSpecialValueText("끝까지")
+        self.src_spin = seconds_spin()
+        self.border_spin = QSpinBox()
+        self.border_spin.setRange(0, 40)
+        self.border_spin.setSuffix(" px")
+        self.border_color = QComboBox()
+        for label, key in BORDER_COLORS:
+            self.border_color.addItem(label, key)
+        self.vol_slider, vol_lbl = percent_slider(200)
+        self.info = QLabel()
+        self.info.setWordWrap(True)
+
+        f = QFormLayout(self.box)
+        f.addRow("위치", self.pos)
+        f.addRow("직접 지정 (왼쪽, 위)", row(self.x_spin, self.y_spin))
+        f.addRow("크기 (화면 너비 대비)", row(self.size_slider, size_lbl))
+        f.addRow("나타나는 시점", self.start_spin)
+        f.addRow("보이는 시간", self.dur_spin)
+        f.addRow("원본에서 시작할 위치", self.src_spin)
+        f.addRow("테두리", row(self.border_spin, self.border_color))
+        f.addRow("작은 화면 소리", row(self.vol_slider, vol_lbl))
+        f.addRow(self.info)
+        self.box.setEnabled(False)
+
+        hint = QLabel("완성 영상의 오른쪽 아래(기본 위치)에 다른 영상을 작게 넣어요. 리액션 캠, 해설 화면, 로고 사진 등에 쓰세요.")
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: gray")
+
+        lay = QVBoxLayout(self)
+        lay.addWidget(row(add, remove, None))
+        lay.addWidget(self.list, 1)
+        lay.addWidget(self.box)
+        lay.addWidget(hint)
+
+        for w in (self.x_spin, self.y_spin, self.start_spin, self.dur_spin, self.src_spin):
+            w.valueChanged.connect(self._store)
+        for w in (self.size_slider, self.vol_slider, self.border_spin):
+            w.valueChanged.connect(self._store)
+        for w in (self.pos, self.border_color):
+            w.currentIndexChanged.connect(self._store)
+        self.reload()
+
+    def reload(self) -> None:
+        cur = self.list.currentRow()
+        self._loading = True
+        self.list.clear()
+        for p in self.project.pips:
+            self.list.addItem(self._text(p))
+        self._loading = False
+        if self.project.pips:
+            self.list.setCurrentRow(min(max(cur, 0), len(self.project.pips) - 1))
+        else:
+            self._on_select(-1)
+
+    def _text(self, p: PipOverlay) -> str:
+        label = dict((k, l) for l, k in POSITION_LABELS).get(p.position, p.position)
+        icon = "🖼" if is_image(p.path) else "🎬"
+        return f"{icon} {Path(p.path).name} · {label} · {fmt_time(p.start)}부터"
+
+    def add_dialog(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "작은 화면으로 넣을 영상/사진", "", VIDEO_FILTER)
+        if not path:
+            return
+        p = PipOverlay(path)
+        if not is_image(path):
+            try:
+                info = probe(path)
+            except Exception as e:
+                QMessageBox.warning(self, "화면 속 화면", str(e))
+                return
+            p.src_duration = info.duration
+            p.has_audio = info.has_audio
+        else:
+            p.border = 0
+        self.project.pips.append(p)
+        self.reload()
+        self.list.setCurrentRow(len(self.project.pips) - 1)
+        self.changed.emit()
+
+    def remove_selected(self) -> None:
+        r = self.list.currentRow()
+        if r >= 0:
+            del self.project.pips[r]
+            self.reload()
+            self.changed.emit()
+
+    def current(self) -> PipOverlay | None:
+        r = self.list.currentRow()
+        return self.project.pips[r] if 0 <= r < len(self.project.pips) else None
+
+    def _on_select(self, _r: int) -> None:
+        p = self.current()
+        self.box.setEnabled(p is not None)
+        if not p:
+            return
+        self._loading = True
+        self.pos.setCurrentIndex(max(0, self.pos.findData(p.position)))
+        self.x_spin.setValue(p.x * 100)
+        self.y_spin.setValue(p.y * 100)
+        self.size_slider.setValue(int(round(p.size * 100)))
+        self.start_spin.setValue(p.start)
+        self.dur_spin.setValue(p.duration)
+        self.src_spin.setValue(p.src_start)
+        self.border_spin.setValue(p.border)
+        self.border_color.setCurrentIndex(max(0, self.border_color.findData(p.border_color)))
+        self.vol_slider.setValue(int(round(p.volume * 100)))
+        self._loading = False
+        self._update_enabled(p)
+
+    def _update_enabled(self, p: PipOverlay) -> None:
+        custom = p.position == "custom"
+        self.x_spin.setEnabled(custom)
+        self.y_spin.setEnabled(custom)
+        video = not is_image(p.path)
+        self.src_spin.setEnabled(video)
+        self.vol_slider.setEnabled(video and p.has_audio)
+        if video:
+            self.info.setText(f"원본 길이 {fmt_time(p.src_duration)}" + ("" if p.has_audio else " · 소리 없음"))
+        else:
+            self.info.setText("사진은 '보이는 시간' 동안 표시돼요 (끝까지 = 영상 끝까지).")
+
+    def _store(self) -> None:
+        if self._loading:
+            return
+        p = self.current()
+        if not p:
+            return
+        p.position = self.pos.currentData()
+        p.x = self.x_spin.value() / 100
+        p.y = self.y_spin.value() / 100
+        p.size = self.size_slider.value() / 100
+        p.start = self.start_spin.value()
+        p.duration = self.dur_spin.value()
+        p.src_start = self.src_spin.value()
+        p.border = self.border_spin.value()
+        p.border_color = self.border_color.currentData()
+        p.volume = self.vol_slider.value() / 100
+        self.list.currentItem().setText(self._text(p))
+        self._update_enabled(p)
+        self.changed.emit()
+
+
+# ------------------------------------------------------------------ 자막
+
+class SubtitlePanel(QWidget):
+    changed = Signal()
+    generate_requested = Signal()
+
+    def __init__(self, project: Project) -> None:
+        super().__init__()
+        self.project = project
+        self._loading = False
+
+        gen_box = QGroupBox("자동 자막 만들기 (Whisper 음성 인식)")
+        self.model = QComboBox()
+        for name, desc in (("tiny", "가장 빠름"), ("base", "빠름"), ("small", "추천"),
+                           ("medium", "정확"), ("large-v3", "가장 정확·느림")):
+            self.model.addItem(f"{name} ({desc})", name)
+        self.lang = QComboBox()
+        for code, label in subs.LANGUAGES.items():
+            self.lang.addItem(label, code)
+        self.source = QComboBox()
+        self.source.addItem("영상 속 말소리", "video")
+        self.source.addItem("등록한 음악의 가사", "music")
+        self.gen_btn = QPushButton("✨ 자동 자막 만들기")
+        self.gen_btn.clicked.connect(self.generate_requested.emit)
+        gf = QFormLayout(gen_box)
+        gf.addRow("인식 모델", self.model)
+        gf.addRow("언어", self.lang)
+        gf.addRow("인식할 소리", self.source)
+        gf.addRow(self.gen_btn)
+        note = QLabel("처음 사용할 때 모델을 내려받아요 (small 약 500MB). 이후에는 인터넷 없이 동작해요.")
+        note.setWordWrap(True)
+        note.setStyleSheet("color: gray")
+        gf.addRow(note)
+
+        self.table = QTableWidget(0, 3)
+        self.table.setHorizontalHeaderLabels(["시작", "끝", "자막 내용"])
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.table.verticalHeader().setVisible(False)
+        self.table.itemChanged.connect(self._on_item_changed)
+
+        add = QPushButton("＋ 줄 추가")
+        add.clicked.connect(self.add_row)
+        rm = QPushButton("줄 삭제")
+        rm.clicked.connect(self.remove_rows)
+        load = QPushButton("SRT 불러오기")
+        load.clicked.connect(self.load_srt)
+        save = QPushButton("SRT 저장")
+        save.clicked.connect(self.save_srt)
+        clear = QPushButton("모두 지우기")
+        clear.clicked.connect(self.clear_all)
+
+        style_box = QGroupBox("자막 모양")
+        self.burn = QComboBox()
+        self.burn.addItem("영상에 입히기 (어디서나 보임)", True)
+        self.burn.addItem("자막 트랙으로 넣기 (끄고 켤 수 있음)", False)
+        self.font = QFontComboBox()
+        self.font_size = QSpinBox()
+        self.font_size.setRange(8, 80)
+        self.outline = QSpinBox()
+        self.outline.setRange(0, 8)
+        self.margin = QSpinBox()
+        self.margin.setRange(0, 200)
+        sf = QFormLayout(style_box)
+        sf.addRow("넣는 방식", self.burn)
+        sf.addRow("글꼴", self.font)
+        sf.addRow("크기 / 외곽선", row(self.font_size, QLabel("외곽선"), self.outline))
+        sf.addRow("아래 여백", self.margin)
+
+        self.warn = QLabel()
+        self.warn.setWordWrap(True)
+        self.warn.setStyleSheet("color: #c0392b")
+
+        lay = QVBoxLayout(self)
+        lay.addWidget(gen_box)
+        lay.addWidget(row(add, rm, None, load, save, clear))
+        lay.addWidget(self.table, 1)
+        lay.addWidget(self.warn)
+        lay.addWidget(style_box)
+
+        for w in (self.model, self.lang, self.source, self.burn):
+            w.currentIndexChanged.connect(self._store)
+        self.font.currentFontChanged.connect(self._store)
+        for w in (self.font_size, self.outline, self.margin):
+            w.valueChanged.connect(self._store)
+        self.reload()
+
+    def reload(self) -> None:
+        s = self.project.subtitles
+        self._loading = True
+        self.model.setCurrentIndex(max(0, self.model.findData(s.model)))
+        self.lang.setCurrentIndex(max(0, self.lang.findData(s.language)))
+        self.source.setCurrentIndex(max(0, self.source.findData(s.source)))
+        self.burn.setCurrentIndex(0 if s.burn_in else 1)
+        from PySide6.QtGui import QFont
+        self.font.setCurrentFont(QFont(s.font_name))
+        self.font_size.setValue(s.font_size)
+        self.outline.setValue(s.outline)
+        self.margin.setValue(s.margin_v)
+        self.table.setRowCount(0)
+        for e in sorted(s.entries, key=lambda x: x.start):
+            self._append(e)
+        self._loading = False
+        self._validate()
+
+    def _append(self, e: SubtitleEntry) -> None:
+        r = self.table.rowCount()
+        self.table.insertRow(r)
+        self.table.setItem(r, 0, QTableWidgetItem(subs.format_ts(e.start)))
+        self.table.setItem(r, 1, QTableWidgetItem(subs.format_ts(e.end)))
+        self.table.setItem(r, 2, QTableWidgetItem(e.text))
+
+    def _store(self) -> None:
+        if self._loading:
+            return
+        s = self.project.subtitles
+        s.model = self.model.currentData()
+        s.language = self.lang.currentData()
+        s.source = self.source.currentData()
+        s.burn_in = bool(self.burn.currentData())
+        s.font_name = self.font.currentFont().family()
+        s.font_size = self.font_size.value()
+        s.outline = self.outline.value()
+        s.margin_v = self.margin.value()
+        self.changed.emit()
+
+    def _on_item_changed(self, _item) -> None:
+        if not self._loading:
+            self._validate()
+            self.changed.emit()
+
+    def _validate(self) -> None:
+        entries, bad = [], 0
+        self._loading = True
+        for r in range(self.table.rowCount()):
+            items = [self.table.item(r, c) for c in range(3)]
+            try:
+                a = subs.parse_ts(items[0].text())
+                b = subs.parse_ts(items[1].text())
+                ok = b > a
+            except (ValueError, AttributeError):
+                ok = False
+            for it in items[:2]:
+                if it:
+                    it.setBackground(QColor(0, 0, 0, 0) if ok else QColor(255, 120, 120, 90))
+            if ok:
+                entries.append(SubtitleEntry(a, b, items[2].text() if items[2] else ""))
+            else:
+                bad += 1
+        self._loading = False
+        self.project.subtitles.entries = entries
+        self.warn.setText(f"시간 형식이 잘못된 줄 {bad}개는 빠져요 (예: 00:01:02,500)." if bad else "")
+
+    def set_entries(self, entries: list[SubtitleEntry]) -> None:
+        self.project.subtitles.entries = entries
+        self.reload()
+        self.changed.emit()
+
+    def add_row(self) -> None:
+        last = self.project.subtitles.entries[-1].end if self.project.subtitles.entries else 0.0
+        self._loading = True
+        self._append(SubtitleEntry(last, last + 2.0, "새 자막"))
+        self._loading = False
+        self._validate()
+        self.table.scrollToBottom()
+        self.changed.emit()
+
+    def remove_rows(self) -> None:
+        rows = sorted({i.row() for i in self.table.selectedIndexes()}, reverse=True)
+        for r in rows:
+            self.table.removeRow(r)
+        self._validate()
+        self.changed.emit()
+
+    def clear_all(self) -> None:
+        if self.table.rowCount() and QMessageBox.question(self, "자막", "자막을 모두 지울까요?") == QMessageBox.Yes:
+            self.set_entries([])
+
+    def load_srt(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "SRT 불러오기", "", "자막 (*.srt);;모든 파일 (*)")
+        if path:
+            try:
+                self.set_entries(subs.load_srt(path))
+            except ValueError as e:
+                QMessageBox.warning(self, "자막", str(e))
+
+    def save_srt(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(self, "SRT 저장", "자막.srt", "자막 (*.srt)")
+        if path:
+            subs.save_srt(path, self.project.subtitles.entries)

@@ -6,6 +6,7 @@
 |---|---|
 | [`windows/`](windows/) | **Windows 앱 (C# / WPF, .NET 8)** — 현재 주력 |
 | [`ios/`](ios/) | iPhone 앱 초기 버전 (SwiftUI, Mac + Xcode 필요) |
+| [`video/`](video/) | **🎬 ReelCut 영상 편집기** (Python / PySide6 + FFmpeg) — 이어붙이기 · 자동 자막 · 비트 맞춤 컷 · 화면 속 화면 |
 
 ## 기능
 - 3일치 시간별 날씨 조회 ([Open-Meteo](https://open-meteo.com), API 키 불필요)

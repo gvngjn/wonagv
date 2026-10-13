@@ -18,3 +18,12 @@ obj/
 *.user
 .vs/
 TestResults/
+
+# Python (video/)
+__pycache__/
+*.pyc
+.pytest_cache/
+video/dist/
+video/build/
+video/*.spec
+video/ffmpeg/
