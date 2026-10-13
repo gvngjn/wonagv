@@ -2,3 +2,4 @@ build/
 playlist.csv
 songquiz.edd
 __pycache__/
+cookies*.txt

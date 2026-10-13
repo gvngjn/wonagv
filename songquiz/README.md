@@ -24,9 +24,21 @@
 # 유튜브 플레이리스트
 python songquiz.py import "https://www.youtube.com/playlist?list=..."
 
+# 유튜브 뮤직 '좋아요 표시한 음악' (비공개라 브라우저 로그인 쿠키 필요)
+python songquiz.py import liked --cookies-from-browser firefox
+
+# 유튜브 '좋아요 표시한 동영상' 전체 (음악 아닌 영상도 섞여 있어요)
+python songquiz.py import liked-videos --cookies-from-browser firefox
+
 # 스포티파이: https://exportify.net 에서 플레이리스트를 CSV 로 내보낸 뒤
 python songquiz.py import my_spotify.csv
 ```
+
+- 좋아요 곡이 많으면 `--limit 50` 처럼 최근 곡만 가져올 수 있어요.
+- 해당 브라우저에서 유튜브에 로그인돼 있어야 해요. 윈도우 크롬/엣지는 최근 보안 변경 때문에
+  쿠키를 못 읽는 경우가 많아서 **파이어폭스를 추천**해요. 안 되면 "Get cookies.txt LOCALLY" 같은
+  확장으로 `cookies.txt` 를 내보내서 `--cookies cookies.txt` 로 넣으세요.
+- 쿠키 파일은 로그인 정보라서 남에게 주거나 깃에 올리지 마세요.
 
 `playlist.csv` 가 생겨요. 엑셀/메모장으로 열어서 확인해 주세요.
 

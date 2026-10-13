@@ -69,19 +69,43 @@ def split_youtube_title(raw, uploader):
     return t, uploader
 
 
-def import_youtube(url):
+# 비공개 재생목록 바로가기
+LIKED = {
+    "liked": "https://music.youtube.com/playlist?list=LM",  # 유튜브 뮤직 '좋아요 표시한 음악'
+    "liked-videos": "https://www.youtube.com/playlist?list=LL",  # 유튜브 '좋아요 표시한 동영상'
+}
+
+
+def cookie_args(args):
+    if getattr(args, "cookies", None):
+        return ["--cookies", args.cookies]
+    if getattr(args, "cookies_from_browser", None):
+        return ["--cookies-from-browser", args.cookies_from_browser]
+    return []
+
+
+def import_youtube(url, cookies):
     need("yt-dlp")
-    out = subprocess.run(
-        ["yt-dlp", "--flat-playlist", "-J", url],
-        check=True, capture_output=True, text=True, encoding="utf-8",
-    ).stdout
-    data = json.loads(out)
+    if url in LIKED and not cookies:
+        sys.exit("좋아요 목록은 비공개라 로그인 정보가 필요해요.\n"
+                 "  --cookies-from-browser firefox  (또는 chrome, edge)\n"
+                 "  --cookies cookies.txt           (브라우저 확장으로 내보낸 쿠키 파일)")
+    url = LIKED.get(url, url)
+    proc = subprocess.run(
+        ["yt-dlp", "--flat-playlist", "-J", *cookies, url],
+        capture_output=True, text=True, encoding="utf-8",
+    )
+    if proc.returncode != 0:
+        sys.exit("yt-dlp 오류:\n" + proc.stderr.strip())
+    data = json.loads(proc.stdout)
     rows = []
     for e in data.get("entries") or [data]:
         if not e:
             continue
         title, artist = split_youtube_title(e.get("title", ""),
                                             e.get("uploader") or e.get("channel"))
+        if e.get("artists"):  # 유튜브 뮤직은 가수 정보를 따로 준다
+            artist = e["artists"][0]
         vid = e.get("url") or e.get("id")
         if vid and not vid.startswith("http"):
             vid = f"https://www.youtube.com/watch?v={vid}"
@@ -110,7 +134,9 @@ def cmd_import(args):
     if "spotify.com" in src:
         sys.exit("스포티파이 링크는 바로 못 읽어요. https://exportify.net 에서 플레이리스트를 "
                  "CSV 로 내보낸 뒤 그 파일 경로를 넣어 주세요.")
-    rows = import_exportify(src) if src.lower().endswith(".csv") else import_youtube(src)
+    rows = import_exportify(src) if src.lower().endswith(".csv") else import_youtube(src, cookie_args(args))
+    if args.limit:
+        rows = rows[: args.limit]
     old = []
     if PLAYLIST.exists():
         with PLAYLIST.open(encoding="utf-8-sig", newline="") as f:
@@ -141,7 +167,7 @@ def edd_key(text):
     return re.sub(r"([\\:=])", r"\\\1", text)
 
 
-def download(row, idx):
+def download(row, idx, cookies):
     CACHE.mkdir(parents=True, exist_ok=True)
     found = list(CACHE.glob(f"{idx:03d}.*"))
     if found:
@@ -150,7 +176,7 @@ def download(row, idx):
     need("yt-dlp")
     print(f"  내려받는 중: {row['artist']} - {row['title']}")
     subprocess.run(
-        ["yt-dlp", "-f", "bestaudio", "--no-playlist", "-o", str(CACHE / f"{idx:03d}.%(ext)s"), url],
+        ["yt-dlp", "-f", "bestaudio", "--no-playlist", *cookies, "-o", str(CACHE / f"{idx:03d}.%(ext)s"), url],
         check=True,
     )
     return next(CACHE.glob(f"{idx:03d}.*"))
@@ -181,7 +207,7 @@ def cmd_build(args):
     songs, chat_lines, used = [], [], {}
     for n, idx in enumerate(order):
         row = rows[idx]
-        src = download(row, idx)
+        src = download(row, idx, cookie_args(args))
         clip = CLIPS / f"{idx:03d}.{args.format}"
         start = float(row.get("start") or args.start)
         if args.force or not clip.exists():
@@ -242,7 +268,12 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("import", help="플레이리스트 가져오기")
-    p.add_argument("source", help="유튜브 플레이리스트 URL 또는 Exportify CSV 경로")
+    p.add_argument("source", help="유튜브 플레이리스트 URL, Exportify CSV 경로, "
+                   "liked(유튜브 뮤직 좋아요 표시한 음악), liked-videos(좋아요 표시한 동영상)")
+    p.add_argument("--cookies-from-browser", metavar="BROWSER",
+                   help="로그인된 브라우저 쿠키 사용 (firefox, chrome, edge 등)")
+    p.add_argument("--cookies", metavar="FILE", help="Netscape 형식 쿠키 파일")
+    p.add_argument("--limit", type=int, help="앞에서부터 최대 몇 곡만 가져올지")
     p.set_defaults(func=cmd_import)
 
     p = sub.add_parser("build", help="클립 만들고 euddraft 설정 생성")
@@ -257,6 +288,9 @@ def main():
                    help="플레이어마다 1개씩 미리 놓아 둘 신호 건물 (랠리 가능한 건물)")
     p.add_argument("--no-shuffle", action="store_true", help="플레이리스트 순서대로 출제")
     p.add_argument("--force", action="store_true", help="클립 다시 자르기")
+    p.add_argument("--cookies-from-browser", metavar="BROWSER",
+                   help="연령 제한 등으로 받기 실패할 때 로그인된 브라우저 쿠키 사용")
+    p.add_argument("--cookies", metavar="FILE", help="Netscape 형식 쿠키 파일")
     p.set_defaults(func=cmd_build)
 
     args = ap.parse_args()
