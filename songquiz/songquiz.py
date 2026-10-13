@@ -182,16 +182,35 @@ def download(row, idx, cookies):
     return next(CACHE.glob(f"{idx:03d}.*"))
 
 
-def make_clip(src, dst, start, seconds, fmt):
-    args = ["ffmpeg", "-y", "-loglevel", "error", "-ss", str(start), "-t", str(seconds),
-            "-i", str(src),
-            "-af", f"loudnorm=I=-16:TP=-1.5,afade=t=in:d=0.5,afade=t=out:st={seconds - 1}:d=1",
-            "-ac", "1"]
-    if fmt == "ogg":
-        args += ["-ar", "44100", "-c:a", "libvorbis", "-q:a", "2"]
-    else:  # 1.16 호환용 wav (용량 큼)
-        args += ["-ar", "22050", "-c:a", "pcm_s16le"]
-    subprocess.run(args + [str(dst)], check=True)
+def make_chunks(src, out_dir, start, seconds, chunk_seconds, fmt):
+    """곡을 seconds 길이로 자른 뒤 chunk_seconds 조각들로 나눈다.
+
+    스타에서는 소리를 중간에 끌 수 없어서 조각을 이어서 재생하고,
+    정답이 나오면 다음 조각을 안 트는 식으로 끈다.
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    full = out_dir / "full.wav"
+    subprocess.run(
+        ["ffmpeg", "-y", "-loglevel", "error", "-ss", str(start), "-t", str(seconds),
+         "-i", str(src),
+         "-af", f"loudnorm=I=-16:TP=-1.5,afade=t=in:d=0.3,afade=t=out:st={seconds - 1}:d=1",
+         "-ac", "1", "-ar", "44100", "-c:a", "pcm_s16le", str(full)],
+        check=True,
+    )
+    files, k = [], 0
+    while k * chunk_seconds < seconds - 0.05:
+        dst = out_dir / f"{k:02d}.{fmt}"
+        args = ["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{k * chunk_seconds:.3f}",
+                "-t", f"{chunk_seconds:.3f}", "-i", str(full)]
+        if fmt == "ogg":
+            args += ["-c:a", "libvorbis", "-q:a", "2"]
+        else:  # 1.16 호환용 wav (용량 큼)
+            args += ["-ar", "22050", "-c:a", "pcm_s16le"]
+        subprocess.run(args + [str(dst)], check=True)
+        files.append(dst)
+        k += 1
+    full.unlink()
+    return files
 
 
 def cmd_build(args):
@@ -204,19 +223,26 @@ def cmd_build(args):
         order = order[: args.limit]
 
     CLIPS.mkdir(parents=True, exist_ok=True)
+    # 조각 길이를 게임 프레임(42ms)의 정수배로 맞춰야 이어 붙일 때 어긋나지 않는다
+    chunk_frames = max(1, round(args.chunk * 1000 / 42))
+    chunk_seconds = chunk_frames * 0.042
     songs, chat_lines, used = [], [], {}
     for n, idx in enumerate(order):
         row = rows[idx]
         src = download(row, idx, cookie_args(args))
-        clip = CLIPS / f"{idx:03d}.{args.format}"
         start = float(row.get("start") or args.start)
-        if args.force or not clip.exists():
-            make_clip(src, clip, start, args.seconds, args.format)
+        clip_dir = CLIPS / f"{idx:03d}_{start:g}s_{args.seconds:g}s_{chunk_frames}f_{args.format}"
+        if args.force or not clip_dir.exists():
+            if clip_dir.exists():
+                shutil.rmtree(clip_dir)
+            make_chunks(src, clip_dir, start, args.seconds, chunk_seconds, args.format)
+        chunks = sorted(clip_dir.glob(f"*.{args.format}"))
         songs.append({
             "title": row["title"].strip(),
             "artist": (row.get("artist") or "").strip(),
-            "file": str(clip.resolve()),
-            "mpq_name": f"songquiz\\{n:03d}.{args.format}",
+            "chunks": [{"file": str(c.resolve()),
+                        "mpq_name": f"songquiz\\{n:03d}_{k:02d}.{args.format}"}
+                       for k, c in enumerate(chunks)],
         })
         for ans in answer_variants(row):
             if len(ans.encode("utf-8")) > MAX_CHAT_BYTES:
@@ -235,7 +261,7 @@ def cmd_build(args):
     data_path = BUILD / "quiz_data.json"
     data_path.write_text(json.dumps({
         "songs": songs,
-        "clip_seconds": args.seconds,
+        "chunk_frames": chunk_frames,
         "hint_seconds": args.hint,
         "gap_seconds": 3,
         "chat_addr": "0x58D900",
@@ -254,6 +280,9 @@ def cmd_build(args):
         "[chatEvent]",
         "__addr__ : 0x58D900",
         *chat_lines,
+        "",
+        ":: 트리거를 매 프레임 실행 (조각 재생 타이밍용)",
+        "[eudTurbo]",
         "",
         f"[{(ROOT / 'map' / 'quiz.py').resolve()}]",
         f"data : {data_path.resolve()}",
@@ -281,6 +310,8 @@ def main():
     p.add_argument("--out", help="출력 맵 경로 (기본: <베이스>_songquiz.scx)")
     p.add_argument("--seconds", type=float, default=20, help="한 곡 재생 길이(초)")
     p.add_argument("--start", type=float, default=45, help="start 칸이 비었을 때 시작 지점(초)")
+    p.add_argument("--chunk", type=float, default=2,
+                   help="조각 길이(초). 정답/스킵 시 최대 이만큼 더 들린 뒤 꺼짐")
     p.add_argument("--hint", type=float, default=10, help="가수 힌트가 나오는 시점(초)")
     p.add_argument("--limit", type=int, help="최대 곡 수")
     p.add_argument("--format", choices=["ogg", "wav"], default="ogg")
