@@ -18,3 +18,10 @@ obj/
 *.user
 .vs/
 TestResults/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+trading/data/
+trading/trendbot.toml

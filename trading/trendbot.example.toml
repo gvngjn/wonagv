@@ -1,0 +1,48 @@
+# trendbot 설정 예시. trendbot.toml 로 복사해서 쓰세요.
+# 모의투자 실행(kis-run)은 이 예시 파일로는 돌지 않습니다. 반드시 내 값으로 고친 복사본이 필요합니다.
+
+[costs]
+# 증권사 수수료 (매수·매도 각각). 내 계좌 수수료로 바꾸세요. 0.00015 = 0.015%
+commission_rate = 0.00015
+min_commission = 0
+# 매도 시 증권거래세+농특세. 시장(코스피/코스닥)과 연도마다 다르니 매년 확인하세요
+sell_tax_rate = 0.0020
+# 백테스트에서 체결가를 불리하게 잡는 여유분 (지정가라도 보수적으로)
+slippage_rate = 0.0005
+
+[order]
+# 지정가 여유: 매수는 어제 종가 +1%, 매도는 -2% 를 호가 단위로 맞춰 냅니다
+buy_limit_buffer = 0.01
+sell_limit_buffer = 0.02
+
+[risk]
+risk_per_trade = 0.01      # 손절 시 잃는 돈 = 총자산의 1%
+stop_atr = 2.0             # 손절폭 = ATR x 2
+max_positions = 5
+max_position_weight = 0.25
+min_order_value = 1000000  # 100만 원 미만 주문은 하지 않음
+min_stop_to_cost = 10.0    # 손절폭이 왕복비용의 10배 미만이면 진입 안 함
+cooldown_days = 10         # 청산 후 재진입 대기 (거래일)
+
+[strategy]
+entry_lookback = 55
+exit_lookback = 20
+trend_ma = 200
+trend_slope_days = 20
+atr_period = 20
+
+[schedule]
+# 이 시간대(한국 시간)에만 주문 판단·전송. 장 시작 전 동시호가 시간
+run_start = "08:30"
+run_end = "08:59"
+# 주말 말고 쉬는 날 (KRX 휴장일). 매년 갱신하세요
+holidays = [
+  "2026-10-05", "2026-10-09", "2026-12-25", "2026-12-31",
+]
+
+[universe]
+symbols = ["005930", "000660", "035420"]
+
+[paths]
+cache_dir = "~/.trendbot/cache"
+state_path = "~/.trendbot/state.json"

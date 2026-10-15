@@ -6,6 +6,7 @@
 |---|---|
 | [`windows/`](windows/) | **Windows 앱 (C# / WPF, .NET 8)** — 현재 주력 |
 | [`ios/`](ios/) | iPhone 앱 초기 버전 (SwiftUI, Mac + Xcode 필요) |
+| [`trading/`](trading/) | 큰 추세만 잡는 저빈도 주식 자동매매 (Python, 모의매매 전용) |
 
 ## 기능
 - 3일치 시간별 날씨 조회 ([Open-Meteo](https://open-meteo.com), API 키 불필요)
