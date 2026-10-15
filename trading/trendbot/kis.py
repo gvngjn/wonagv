@@ -201,7 +201,8 @@ class KisMockClient:
                     volume=float(row.get("acml_vol") or 0),
                 )
                 days.append(bar.day)
-                if bar.open > 0 and start <= bar.day <= end:  # 거래정지일은 시가 0으로 온다
+                # 거래정지일·시세 오류는 0원으로 온다. 0원 봉이 섞이면 가짜 손절이 나므로 버린다
+                if min(bar.open, bar.high, bar.low, bar.close) > 0 and start <= bar.day <= end:
                     bars[bar.day] = bar
             if not days or min(days) <= start:
                 break
@@ -241,17 +242,20 @@ class KisMockClient:
             fk, nk, tr_cont = data.get("ctx_area_fk100", ""), data.get("ctx_area_nk100", ""), "N"
         return Balance(cash, holdings)
 
-    def market_order(self, symbol: str, side: Side, quantity: int) -> str:
-        """시장가 주문. 장 시작 전(08:30~)에 내면 시초가로 체결된다. 주문번호를 돌려준다."""
+    def limit_order(self, symbol: str, side: Side, quantity: int, price: int) -> str:
+        """지정가 주문 (시장가는 쓰지 않음). 장 시작 전 동시호가에 내면 시초가가 지정가보다
+        유리할 때 시초가로 체결된다. 주문번호를 돌려준다."""
         if quantity <= 0:
             raise KisError("주문 수량은 1주 이상이어야 합니다")
+        if price <= 0 or price != int(price):
+            raise KisError(f"{symbol}: 지정가가 올바르지 않습니다 ({price})")
         _, data = self._call("POST", "/uapi/domestic-stock/v1/trading/order-cash", TR_BUY if side is Side.BUY else TR_SELL, {
             "CANO": self.config.account_no,
             "ACNT_PRDT_CD": self.config.account_product,
             "PDNO": symbol,
-            "ORD_DVSN": "01",
+            "ORD_DVSN": "00",  # 00 = 지정가
             "ORD_QTY": str(quantity),
-            "ORD_UNPR": "0",
+            "ORD_UNPR": str(int(price)),
             "EXCG_ID_DVSN_CD": "KRX",
             "SLL_TYPE": "01" if side is Side.SELL else "",
             "CNDT_PRIC": "",

@@ -45,6 +45,9 @@ class TrendBreakoutStrategy:
         if len(bars) < self.warmup:
             return Signal(Action.HOLD, "데이터 부족")
         today = bars[-1]
+        # 시세 오류로 0원이 들어오면 멀쩡한 보유 종목이 가짜 손절로 팔릴 수 있다
+        if min(today.open, today.high, today.low, today.close) <= 0:
+            return Signal(Action.HOLD, "가격 0원 데이터라 판단하지 않음")
         atr = ind.atr(bars, self.atr_period)
 
         if position is not None:

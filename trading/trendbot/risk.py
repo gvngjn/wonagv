@@ -38,7 +38,9 @@ class RiskManager:
         atr: float,
         open_positions: int,
         costs: CostModel,
+        fill_price: float | None = None,
     ) -> Sizing:
+        """price: 판단 기준가(종가). fill_price: 실제로 낼 지정가 (현금 계산용, 없으면 price)."""
         stop_distance = self.stop_atr * atr
         stop_price = price - stop_distance
         if open_positions >= self.max_positions:
@@ -50,7 +52,7 @@ class RiskManager:
 
         by_risk = equity * self.risk_per_trade / stop_distance
         by_weight = equity * self.max_position_weight / price
-        unit_cost = costs.buy_price(price) * (1 + costs.commission_rate)
+        unit_cost = costs.buy_price(fill_price or price) * (1 + costs.commission_rate)
         by_cash = cash / unit_cost
         quantity = math.floor(min(by_risk, by_weight, by_cash))
         if quantity <= 0 or quantity * price < self.min_order_value:

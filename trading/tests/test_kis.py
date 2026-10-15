@@ -1,14 +1,17 @@
 import json
 import tempfile
 import unittest
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from trendbot import kis
 from trendbot.kis import KisConfig, KisError, KisMockClient
-from trendbot.live import State, completed_bars, run_once
+from trendbot.config import Settings
+from trendbot.costs import CostModel
+from trendbot.live import State, run_once
 from trendbot.models import Side
+from trendbot.schedule import KST
 
 from .helpers import bars_from_closes, flat_then_rally
 
@@ -89,14 +92,37 @@ class KisClientTests(unittest.TestCase):
         token_calls = [c for c in fake.calls if c[1].path == "/oauth2/tokenP"]
         self.assertEqual(len(token_calls), 1)
 
-    def test_market_order_body(self):
+    def test_limit_order_body(self):
         fake = FakeKis({})
         with tempfile.TemporaryDirectory() as tmp:
-            odno = make_client(fake, tmp).market_order("005930", Side.BUY, 3)
+            odno = make_client(fake, tmp).limit_order("005930", Side.BUY, 3, 70_100)
         self.assertEqual(odno, "0000123")
         tr_id, body = fake.orders[0]
         self.assertEqual(tr_id, "VTTC0012U")
-        self.assertEqual((body["PDNO"], body["ORD_DVSN"], body["ORD_QTY"], body["ORD_UNPR"]), ("005930", "01", "3", "0"))
+        self.assertEqual((body["PDNO"], body["ORD_DVSN"], body["ORD_QTY"], body["ORD_UNPR"]), ("005930", "00", "3", "70100"))
+
+    def test_no_market_order_in_client(self):
+        self.assertFalse(hasattr(KisMockClient, "market_order"))
+        source = Path(kis.__file__).read_text(encoding="utf-8")
+        self.assertNotIn('"ORD_DVSN": "01"', source)
+
+    def test_zero_price_bars_are_dropped(self):
+        end = date(2026, 10, 14)
+        bars = dated([10_000.0] * 5, end)
+        fake = FakeKis({"005930": bars})
+        real = fake.__call__
+
+        def with_zero(method, url, headers, body):
+            status, h, data = real(method, url, headers, body)
+            for row in data.get("output2") or []:
+                if row.get("stck_bsop_date") == end.strftime("%Y%m%d"):
+                    row["stck_clpr"] = "0"
+            return status, h, data
+
+        with tempfile.TemporaryDirectory() as tmp:
+            got = make_client(with_zero, tmp).daily_bars("005930", bars[0].day, end)
+        self.assertEqual(len(got), 4)
+        self.assertNotIn(end, [b.day for b in got])
 
     def test_error_response_raises(self):
         def failing(method, url, headers, body):
@@ -122,55 +148,92 @@ class KisClientTests(unittest.TestCase):
             os.environ.update(old)
 
 
+def make_settings(tmp):
+    return Settings(costs=CostModel(), cache_dir=Path(tmp) / "cache", state_path=Path(tmp) / "state.json")
+
+
 class LiveRunTests(unittest.TestCase):
-    now = datetime(2026, 10, 15, 8, 40)
+    now = datetime(2026, 10, 15, 8, 40, tzinfo=KST)  # 목요일 장 시작 전
+    yesterday = date(2026, 10, 14)
+
+    def run_live(self, fake, tmp, symbols, submit, settings=None):
+        settings = settings or make_settings(tmp)
+        return run_once(make_client(fake, tmp), settings, symbols, submit=submit, now=self.now)
 
     def test_preview_does_not_order(self):
-        bars = dated(flat_then_rally(rally_days=1, step=0.05), date(2026, 10, 14))
+        bars = dated(flat_then_rally(rally_days=1, step=0.05), self.yesterday)
         fake = FakeKis({"005930": bars})
         with tempfile.TemporaryDirectory() as tmp:
-            report = run_once(make_client(fake, tmp), ["005930"], Path(tmp) / "state.json", submit=False, now=self.now)
+            report = self.run_live(fake, tmp, ["005930"], submit=False)
             self.assertFalse((Path(tmp) / "state.json").exists())
         self.assertEqual([(o.side, o.symbol) for o in report.orders], [(Side.BUY, "005930")])
         self.assertEqual(fake.orders, [])
 
-    def test_submit_buys_and_records_stop(self):
-        bars = dated(flat_then_rally(rally_days=1, step=0.05), date(2026, 10, 14))
+    def test_submit_buys_with_limit_and_records_stop(self):
+        bars = dated(flat_then_rally(rally_days=1, step=0.05), self.yesterday)
         fake = FakeKis({"005930": bars})
         with tempfile.TemporaryDirectory() as tmp:
-            state_path = Path(tmp) / "state.json"
-            report = run_once(make_client(fake, tmp), ["005930"], state_path, submit=True, now=self.now)
-            state = State.load(state_path)
-        self.assertEqual(fake.orders[0][0], "VTTC0012U")
-        self.assertEqual(len(report.submitted), 1)
+            report = self.run_live(fake, tmp, ["005930"], submit=True)
+            state = State.load(Path(tmp) / "state.json")
+        tr_id, body = fake.orders[0]
+        self.assertEqual((tr_id, body["ORD_DVSN"]), ("VTTC0012U", "00"))
+        limit = int(body["ORD_UNPR"])
+        self.assertGreater(limit, bars[-1].close)
+        self.assertLess(limit, bars[-1].close * 1.02)
+        self.assertLessEqual(limit * int(body["ORD_QTY"]), fake.cash)
         self.assertAlmostEqual(state.stops["005930"], report.orders[0].stop_price)
 
     def test_held_position_exits_on_stop_and_starts_cooldown(self):
-        bars = dated(flat_then_rally(rally_days=5), date(2026, 10, 14))
+        bars = dated(flat_then_rally(rally_days=5), self.yesterday)
         fake = FakeKis({"005930": bars}, holdings={"005930": 100})
         with tempfile.TemporaryDirectory() as tmp:
-            state_path = Path(tmp) / "state.json"
-            State(stops={"005930": bars[-1].close * 2}, entry_days={"005930": date(2026, 9, 1)}).save(state_path)
-            run_once(make_client(fake, tmp), [], state_path, submit=True, now=self.now)
-            state = State.load(state_path)
+            settings = make_settings(tmp)
+            State(stops={"005930": bars[-1].close * 2}, entry_days={"005930": date(2026, 9, 1)}).save(settings.state_path)
+            self.run_live(fake, tmp, [], submit=True, settings=settings)
+            state = State.load(settings.state_path)
         tr_id, body = fake.orders[0]
-        self.assertEqual((tr_id, body["ORD_QTY"]), ("VTTC0011U", "100"))
+        self.assertEqual((tr_id, body["ORD_QTY"], body["ORD_DVSN"]), ("VTTC0011U", "100", "00"))
+        self.assertLess(int(body["ORD_UNPR"]), bars[-1].close)
         self.assertEqual(state.last_exit["005930"], self.now.date())
         self.assertNotIn("005930", state.stops)
+
+    def test_zero_price_does_not_trigger_fake_stop(self):
+        bars = dated(flat_then_rally(rally_days=5), self.yesterday)
+        fake = FakeKis({"005930": bars}, holdings={"005930": 100})
+        real = fake.__call__
+
+        def zero_last(method, url, headers, body):
+            status, h, data = real(method, url, headers, body)
+            for row in data.get("output2") or []:
+                if row.get("stck_bsop_date") == self.yesterday.strftime("%Y%m%d"):
+                    row.update(stck_oprc="0", stck_hgpr="0", stck_lwpr="0", stck_clpr="0")
+            return status, h, data
+
+        with tempfile.TemporaryDirectory() as tmp:
+            settings = make_settings(tmp)
+            State(stops={"005930": bars[-2].close * 0.9}).save(settings.state_path)
+            report = run_once(make_client(zero_last, tmp), settings, [], submit=True, now=self.now)
+        self.assertEqual(fake.orders, [])
+        self.assertTrue(any("최근 일봉" in r for _, r in report.skipped))
 
     def test_stale_stop_dropped_when_buy_never_filled(self):
         fake = FakeKis({})
         with tempfile.TemporaryDirectory() as tmp:
-            state_path = Path(tmp) / "state.json"
-            State(stops={"000660": 1.0}, entry_days={"000660": date(2026, 10, 14)}).save(state_path)
-            run_once(make_client(fake, tmp), [], state_path, submit=True, now=self.now)
-            self.assertEqual(State.load(state_path).stops, {})
+            settings = make_settings(tmp)
+            State(stops={"000660": 1.0}, entry_days={"000660": date(2026, 10, 14)}).save(settings.state_path)
+            self.run_live(fake, tmp, [], submit=True, settings=settings)
+            self.assertEqual(State.load(settings.state_path).stops, {})
 
-    def test_incomplete_today_bar_is_dropped(self):
-        bars = dated([100.0] * 3, date(2026, 10, 15))
-        self.assertEqual(len(completed_bars(bars, datetime(2026, 10, 15, 10, 0))), 2)
-        self.assertEqual(len(completed_bars(bars, datetime(2026, 10, 15, 16, 0))), 3)
-        self.assertEqual(len(completed_bars(bars, datetime(2026, 10, 16, 8, 40) - timedelta(days=0))), 3)
+    def test_second_run_uses_cache(self):
+        bars = dated(flat_then_rally(), self.yesterday)
+        fake = FakeKis({"005930": bars})
+        with tempfile.TemporaryDirectory() as tmp:
+            self.run_live(fake, tmp, ["005930"], submit=False)
+            first = sum(1 for c in fake.calls if c[1].path.endswith("itemchartprice"))
+            self.run_live(fake, tmp, ["005930"], submit=False)
+            second = sum(1 for c in fake.calls if c[1].path.endswith("itemchartprice")) - first
+        self.assertGreater(first, 0)
+        self.assertEqual(second, 0)
 
 
 if __name__ == "__main__":

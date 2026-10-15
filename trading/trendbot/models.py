@@ -30,6 +30,8 @@ class Order:
     reason: str = ""
     # 매수 주문일 때 함께 정해 두는 손절 가격
     stop_price: float | None = None
+    # 지정가. 시장가 주문은 쓰지 않는다
+    limit_price: float | None = None
 
 
 @dataclass(frozen=True)

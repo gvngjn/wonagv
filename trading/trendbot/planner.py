@@ -12,6 +12,7 @@ from datetime import date
 
 from .costs import CostModel
 from .models import Bar, Order, Position, Side
+from .orders import OrderSettings
 from .risk import RiskManager
 from .strategy import Action, TrendBreakoutStrategy
 
@@ -37,8 +38,13 @@ def plan_orders(
     costs: CostModel,
     last_exit: Mapping[str, date] | None = None,
     busy: Collection[str] = (),
+    order: OrderSettings | None = None,
 ) -> Plan:
-    """history: 종목별로 오늘(마지막 봉)까지의 일봉. busy: 이미 주문이 걸려 있어 건너뛸 종목."""
+    """history: 종목별로 오늘(마지막 봉)까지의 일봉. busy: 이미 주문이 걸려 있어 건너뛸 종목.
+
+    모든 주문은 마지막 종가 기준 지정가(order 설정)로 만든다.
+    """
+    order = order or OrderSettings()
     plan = Plan()
     last_exit = last_exit or {}
     taken = set(busy)
@@ -50,7 +56,8 @@ def plan_orders(
             continue
         signal = strategy.evaluate(history[symbol], pos)
         if signal.action is Action.EXIT:
-            plan.orders.append(Order(symbol, Side.SELL, pos.quantity, signal.reason))
+            limit = order.limit_price(Side.SELL, history[symbol][-1].close)
+            plan.orders.append(Order(symbol, Side.SELL, pos.quantity, signal.reason, limit_price=limit))
             taken.add(symbol)
 
     open_count = len(positions)
@@ -65,16 +72,17 @@ def plan_orders(
         if signal.action is not Action.ENTER or signal.atr is None:
             continue
         price = bars[-1].close
+        limit = order.limit_price(Side.BUY, price)
         sizing = risk.size_entry(
             equity=equity, cash=cash, price=price, atr=signal.atr,
-            open_positions=open_count, costs=costs,
+            open_positions=open_count, costs=costs, fill_price=limit,
         )
         if sizing.quantity <= 0:
             plan.skipped.append((symbol, sizing.reason))
             continue
-        plan.orders.append(Order(symbol, Side.BUY, sizing.quantity, signal.reason, sizing.stop_price))
+        plan.orders.append(Order(symbol, Side.BUY, sizing.quantity, signal.reason, sizing.stop_price, limit))
         taken.add(symbol)
         open_count += 1
-        # 내일 시가가 조금 올라도 현금이 모자라지 않게 여유를 둔다
-        cash -= sizing.quantity * costs.buy_price(price) * 1.05
+        # 지정가 전액 + 수수료만큼 현금을 묶어 둔다
+        cash -= sizing.quantity * costs.buy_price(limit) * (1 + costs.commission_rate)
     return plan
