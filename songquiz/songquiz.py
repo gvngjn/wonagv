@@ -30,6 +30,24 @@ FIELDS = ["title", "artist", "answers", "url", "start"]
 # chatEvent 한 줄 채팅 최대 78바이트
 MAX_CHAT_BYTES = 78
 
+# 방장 옵션 채팅 명령. chatEvent 값은 OPTION_BASE + code (곡 정답 값과 안 겹치게)
+OPTION_BASE = 0x100000
+
+
+def option_table(song_count):
+    opts = []
+    for n in (10, 20, 30, 50):
+        if n < song_count:
+            opts.append({"text": f"!{n}곡", "kind": "songs", "value": n})
+    opts.append({"text": "!전곡", "kind": "songs", "value": 0})
+    for n in (5, 10, 20):
+        opts.append({"text": f"!목표{n}", "kind": "target", "value": n})
+    opts.append({"text": "!목표없음", "kind": "target", "value": 0})
+    opts.append({"text": "!시작", "kind": "start", "value": 0})
+    for code, o in enumerate(opts, 1):
+        o["code"] = code
+    return opts
+
 
 def need(tool):
     if shutil.which(tool) is None:
@@ -280,6 +298,10 @@ def cmd_build(args):
             used[ans] = n
             chat_lines.append(f"{edd_key(ans)} : {n + 2}")
 
+    options = option_table(len(songs))
+    for o in options:
+        chat_lines.append(f"{edd_key(o['text'])} : {OPTION_BASE + o['code']}")
+
     BUILD.mkdir(exist_ok=True)
     data_path = BUILD / "quiz_data.json"
     data_path.write_text(json.dumps({
@@ -290,6 +312,13 @@ def cmd_build(args):
         "gap_seconds": 3,
         "chat_addr": "0x58D900",
         "signal_unit": args.signal_unit,
+        "default_songs": args.songs,
+        "default_target": args.target,
+        "lobby_seconds": args.lobby,
+        "skip_key": args.skip_key,
+        "skip_percent": args.skip_percent,
+        "option_base": OPTION_BASE,
+        "options": options,
     }, ensure_ascii=False, indent=2), encoding="utf-8")
 
     base = Path(args.map).resolve()
@@ -339,7 +368,15 @@ def main():
     p.add_argument("--hint", type=float, default=10, help="가수 힌트가 나오는 시점(초)")
     p.add_argument("--extra", type=float, default=10,
                    help="노래가 끝난 뒤 초성 힌트를 보여 주고 더 기다리는 시간(초). 0이면 바로 정답 공개")
-    p.add_argument("--limit", type=int, help="최대 곡 수")
+    p.add_argument("--limit", type=int, help="맵에 넣을 최대 곡 수 (용량 줄이기)")
+    p.add_argument("--songs", type=int, default=0,
+                   help="기본 출제 곡 수 (0 = 전곡). 방장이 게임에서 !20곡 처럼 바꿀 수 있음")
+    p.add_argument("--target", type=int, default=0,
+                   help="기본 목표 점수 (0 = 없음). 방장이 !목표10 처럼 바꿀 수 있음")
+    p.add_argument("--lobby", type=float, default=60, help="방장 옵션 대기 시간(초), 지나면 자동 시작")
+    p.add_argument("--skip-key", default="P", help="스킵 투표 키 (A~Z, 기존 맵들은 보통 K)")
+    p.add_argument("--skip-percent", type=int, default=100,
+                   help="스킵에 필요한 투표 비율 %% (100 = 전원, 50 = 절반 이상)")
     p.add_argument("--format", choices=["ogg", "wav"], default="ogg")
     p.add_argument("--signal-unit", default="Terran Command Center",
                    help="플레이어마다 1개씩 미리 놓아 둘 신호 건물 (랠리 가능한 건물)")

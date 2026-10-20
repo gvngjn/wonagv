@@ -9,7 +9,12 @@ songquiz.py build 가 만든 songquiz.edd 에서 [chatEvent] 다음에 불러온
   처리되므로, 모든 PC 가 같은 프레임에 랠리 좌표를 보고 판정한다.
     (RALLY_X0 + 라운드번호, ANSWER_Y) : 정답
     (RALLY_X0 + 라운드번호, SKIP_Y)   : 스킵 투표
+    (RALLY_X0 + 옵션코드, OPTION_Y)   : 방장 옵션 (대기실에서만)
   라운드 번호가 좌표에 들어가 있어서 지난 라운드 신호는 다시 인식되지 않는다.
+
+기존 노래 맞추기 맵(갈대 오픈소스 계열)처럼:
+  시작하면 방장이 옵션(곡 수, 목표 점수)을 정하고, 키를 눌러 스킵 투표를 하며,
+  정해진 곡 수가 끝나거나 목표 점수에 먼저 닿은 사람이 우승한다.
 
 중간에 끄기:
   스타에는 재생 중인 소리를 멈추는 기능이 없어서, 곡을 짧은 조각으로 잘라
@@ -34,25 +39,42 @@ FPS = 1000 / 42
 HINT_FRAMES = int(DATA["hint_seconds"] * FPS)
 GAP_FRAMES = int(DATA["gap_seconds"] * FPS)
 EXTRA_FRAMES = int(DATA.get("extra_seconds", 0) * FPS)  # 초성 힌트 후 추가 시간
-START_DELAY_FRAMES = int(5 * FPS)
+LOBBY_FRAMES = int(DATA.get("lobby_seconds", 60) * FPS)  # 방장 옵션 대기 (자동 시작)
+VICTORY_FRAMES = int(10 * FPS)
+
+DEFAULT_TOTAL = min(DATA.get("default_songs") or SONG_COUNT, SONG_COUNT)
+DEFAULT_TARGET = DATA.get("default_target", 0)
+SKIP_PERCENT = DATA.get("skip_percent", 100)
+SKIP_KEY = DATA.get("skip_key", "P").upper()
+OPTION_BASE = DATA["option_base"]
+OPTIONS = DATA["options"]  # [{"text", "code", "kind", "value"}]
 
 RALLY_X0 = 64
 ANSWER_Y = 64
 SKIP_Y = 96
+OPTION_Y = 128
 
-# 스킵 키 P (가상 키 코드 0x50). 키 상태 배열 0x596A18, 채팅 입력 중 플래그 0x68C144
-KEY_P = 0x596A18 + 0x50
+# 키 상태 배열 0x596A18 (+가상 키 코드, A~Z 는 아스키와 같음), 채팅 입력 중 플래그 0x68C144
+ep_assert(len(SKIP_KEY) == 1 and "A" <= SKIP_KEY <= "Z", "skip_key 는 A~Z 한 글자")
+KEY_SKIP = 0x596A18 + ord(SKIP_KEY)
 CHAT_TYPING = 0x68C144
 
 CUNIT_OWNER = 0x4C
 CUNIT_TYPE = 0x64
 CUNIT_RALLY = 0xF8
 
-ST_WAIT = 0     # 다음 곡 대기
-ST_GUESS = 1    # 노래 재생 중, 정답 받는 중
-ST_END = 2
+ST_LOBBY = 0    # 방장 옵션 설정
+ST_WAIT = 1     # 다음 곡 대기
+ST_GUESS = 2    # 노래 재생 중, 정답 받는 중
+ST_END = 3      # 결과 발표 후 승리 대기
+ST_DONE = 4
 
-state = EUDVariable(ST_WAIT)
+state = EUDVariable(ST_LOBBY)
+total = EUDVariable(DEFAULT_TOTAL)    # 이번 판 곡 수
+target = EUDVariable(DEFAULT_TARGET)  # 목표 점수 (0 = 없음)
+top_score = EUDVariable(0)
+host = EUDVariable(8)                 # 방장 = 남아 있는 가장 앞 번호 플레이어
+host_last_rally = EUDVariable(0)
 cur = EUDVariable(0)          # 현재 곡 번호 (0부터)
 chunk = EUDVariable(0)        # 다음에 틀 조각 번호
 chunk_at = EUDVariable(0)     # 다음 조각을 틀 게임 틱
@@ -68,7 +90,7 @@ chunk_count = EUDArray([len(s["chunks"]) for s in SONGS])
 # 아래는 자기 PC 에서만 쓰는 값 (게임 상태에 영향 X)
 local_sent_round = EUDVariable(0xFFFFFFFF)
 local_skip_round = EUDVariable(0xFFFFFFFF)
-local_p_was_down = EUDVariable(0)
+local_key_was_down = EUDVariable(0)
 select_buf = EUDArray(1)
 
 
@@ -82,11 +104,21 @@ def onPluginStart():
             EUDEndIf()
         EUDEndIf()
 
-    DoActions(DisplayTextAll(
-        f"\x1f[노래 맞추기]\x04 총 {SONG_COUNT}곡! 노래 제목을 채팅으로 치세요. "
-        "\x07P\x04 = 스킵 투표 (전원 동의 시 스킵)"
-    ))
-    next_at << f_getgametick() + START_DELAY_FRAMES
+    for p in EUDLoopRange(8):
+        f_setcurpl(p)
+        DoActions(LeaderBoardScore(Custom, "점수"))
+    f_setcurpl(P1)
+
+    skip_rule = "전원" if SKIP_PERCENT >= 100 else f"{SKIP_PERCENT}% 이상"
+    lines = [
+        f"\x1f[노래 맞추기]\x04 총 {SONG_COUNT}곡 수록. 노래 제목을 채팅으로 치세요 (띄어쓰기 상관없음).",
+        f"\x07{SKIP_KEY}\x04 = 스킵 투표 ({skip_rule} 동의 시 스킵)",
+        "\x1c방장 옵션:\x04 " + " ".join(o["text"] for o in OPTIONS),
+        f"\x04{int(LOBBY_FRAMES / FPS)}초 뒤 자동 시작",
+    ]
+    for line in lines:
+        DoActions(DisplayTextAll(line))
+    next_at << f_getgametick() + LOBBY_FRAMES
 
 
 def add_sound_files():
@@ -121,7 +153,7 @@ def for_each_song(fn):
 
 
 def start_round(now):
-    f_printAll("\x1f[{}/{}]\x04 노래 시작! 제목을 채팅으로 치세요.", cur + 1, SONG_COUNT)
+    f_printAll("\x1f[{}/{}]\x04 노래 시작! 제목을 채팅으로 치세요.", cur + 1, total)
     chunk << 0
     chunk_at << now
     hint_at << now + HINT_FRAMES
@@ -148,11 +180,77 @@ def show_answer(i):
     DoActions(DisplayTextAll(f"\x1f정답:\x04 {s['title']} - {s['artist']}"))
 
 
-def send_rally(y):
+def send_rally(x, y):
     me = f_getuserplayerid()
     select_buf[0] = signal_ptr[me]
     QueueGameCommand_Select(1, select_buf)
-    QueueGameCommand_RightClick(y * 65536 + RALLY_X0 + cur)
+    QueueGameCommand_RightClick(y * 65536 + RALLY_X0 + x)
+
+
+def find_host():
+    host << 8
+    for p in EUDLoopRange(8):
+        EUDContinueIf(signal_ptr[p] == 0)
+        EUDContinueIf(f_playerexist(p) == 0)
+        host << p
+        EUDBreak()
+
+
+def show_options():
+    f_printAll("\x1f[옵션]\x04 곡 수 \x07{}\x04 / 목표 점수 \x07{}\x04 (0 = 끝까지)",
+               total, target)
+
+
+def lobby(now):
+    """대기실: 방장 채팅 명령으로 옵션 설정. 시간이 지나거나 !시작 이면 시작."""
+    old_host = EUDVariable()
+    old_host << host
+    find_host()
+    if EUDIfNot()(host == old_host):
+        if EUDIf()(host <= 7):
+            f_printAll("\x1c방장:\x07 {}", PName(host))
+            host_last_rally << f_dwread(signal_ptr[host] + CUNIT_RALLY)
+        EUDEndIf()
+    EUDEndIf()
+
+    # 내가 방장이면 옵션 채팅을 신호로 보낸다 (로컬)
+    if EUDIf()([host == f_getuserplayerid(), Memory(CHAT_ADDR, AtLeast, OPTION_BASE)]):
+        send_rally(f_dwread(CHAT_ADDR) - OPTION_BASE, OPTION_Y)
+    EUDEndIf()
+
+    start = EUDVariable()
+    start << 0
+    if EUDIf()(host <= 7):
+        rally = f_dwread(signal_ptr[host] + CUNIT_RALLY)
+        if EUDIfNot()(rally == host_last_rally):
+            host_last_rally << rally
+            code = rally - (OPTION_Y * 65536 + RALLY_X0)
+            EUDSwitch(code)
+            for o in OPTIONS:
+                if EUDSwitchCase()(o["code"]):
+                    if o["kind"] == "songs":
+                        total << min(o["value"] or SONG_COUNT, SONG_COUNT)
+                    elif o["kind"] == "target":
+                        target << o["value"]
+                    elif o["kind"] == "start":
+                        start << 1
+                    EUDBreak()
+            EUDEndSwitch()
+            if EUDIf()(start == 0):
+                show_options()
+            EUDEndIf()
+        EUDEndIf()
+    EUDEndIf()
+
+    if EUDIf()(now >= next_at):
+        start << 1
+    EUDEndIf()
+    if EUDIf()(start == 1):
+        show_options()
+        DoActions(DisplayTextAll("\x1f게임 시작!"))
+        next_at << now + GAP_FRAMES
+        state << ST_WAIT
+    EUDEndIf()
 
 
 def local_input():
@@ -166,26 +264,26 @@ def local_input():
         ]):
             if EUDIf()(f_dwread(CHAT_ADDR) == cur + 2):
                 local_sent_round << cur
-                send_rally(ANSWER_Y)
+                send_rally(cur, ANSWER_Y)
             EUDEndIf()
         EUDEndIf()
 
-        # P 키 (누르는 순간만, 채팅 입력 중이면 무시)
-        p_down = EUDVariable()
-        p_down << 0
-        if EUDIf()([MemoryX(KEY_P, Exactly, 1, 1), Memory(CHAT_TYPING, Exactly, 0)]):
-            p_down << 1
+        # 스킵 키 (누르는 순간만, 채팅 입력 중이면 무시)
+        key_down = EUDVariable()
+        key_down << 0
+        if EUDIf()([MemoryX(KEY_SKIP, Exactly, 1, 1), Memory(CHAT_TYPING, Exactly, 0)]):
+            key_down << 1
         EUDEndIf()
         if EUDIf()([
-            p_down == 1,
-            local_p_was_down == 0,
+            key_down == 1,
+            local_key_was_down == 0,
             local_skip_round != cur,
             local_sent_round != cur,
         ]):
             local_skip_round << cur
-            send_rally(SKIP_Y)
+            send_rally(cur, SKIP_Y)
         EUDEndIf()
-        local_p_was_down << p_down
+        local_key_was_down << key_down
     EUDEndIf()
 
 
@@ -193,8 +291,17 @@ def end_round(now):
     """노래를 끊고 다음 곡 준비."""
     for_each_song(show_answer)
     cur << cur + 1
-    if EUDIf()(cur >= SONG_COUNT):
+    game_over = EUDVariable()
+    game_over << 0
+    if EUDIf()(cur >= total):
+        game_over << 1
+    EUDEndIf()
+    if EUDIf()([target >= 1, top_score >= target]):
+        game_over << 1
+    EUDEndIf()
+    if EUDIf()(game_over == 1):
         state << ST_END
+        next_at << now + VICTORY_FRAMES
         show_final()
     if EUDElse()():
         next_at << now + GAP_FRAMES
@@ -231,24 +338,23 @@ def check_signals(now):
 
     if EUDIf()(winner <= 7):
         scores[winner] += 1
+        if EUDIf()(scores[winner] > top_score):
+            top_score << scores[winner]
+        EUDEndIf()
         oldcp = f_getcurpl()
         f_setcurpl(winner)
         DoActions(SetScore(CurrentPlayer, Add, 1, Custom))
         f_setcurpl(oldcp)
         f_printAll("\x07{} \x04님 정답! (\x07{}점\x04)", PName(winner), scores[winner])
         end_round(now)
-    if EUDElseIf()([active >= 1, votes >= active]):
-        DoActions(DisplayTextAll("\x08전원 스킵!"))
+    if EUDElseIf()([active >= 1, votes * 100 >= active * SKIP_PERCENT]):
+        DoActions(DisplayTextAll("\x08스킵!"))
         end_round(now)
     EUDEndIf()
 
 
 def show_final():
-    best = EUDVariable(0)
-    for p in EUDLoopRange(8):
-        if EUDIf()(scores[p] > best):
-            best << scores[p]
-        EUDEndIf()
+    best = top_score
     DoActions(DisplayTextAll("\x1f[노래 맞추기] 게임 끝!"))
     if EUDIf()(best == 0):
         DoActions(DisplayTextAll("\x04아무도 못 맞췄어요..."))
@@ -263,6 +369,19 @@ def show_final():
 def beforeTriggerExec():
     add_sound_files()
     now = f_getgametick()
+
+    if EUDIf()(state == ST_LOBBY):
+        lobby(now)
+    EUDEndIf()
+
+    if EUDIf()([state == ST_END, now >= next_at]):
+        state << ST_DONE
+        oldcp = f_getcurpl()
+        for p in EUDLoopRange(8):
+            f_setcurpl(p)
+            DoActions(Victory())
+        f_setcurpl(oldcp)
+    EUDEndIf()
 
     if EUDIf()(state == ST_WAIT):
         if EUDIf()(now >= next_at):
