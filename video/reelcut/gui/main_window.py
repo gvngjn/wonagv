@@ -258,6 +258,9 @@ class MainWindow(QMainWindow):
         e.addAction(self.undo_action)
         e.addAction(self.redo_action)
         h = self.menuBar().addMenu("도움말")
+        logs_a = QAction("오류 기록 폴더 열기", self)
+        logs_a.triggered.connect(self.open_logs)
+        h.addAction(logs_a)
         about = QAction("ReelCut 정보", self)
         about.triggered.connect(lambda: QMessageBox.about(
             self, "ReelCut",
@@ -633,6 +636,12 @@ class MainWindow(QMainWindow):
             subprocess.Popen(["open", "-R", path])
         else:
             subprocess.Popen(["xdg-open", str(Path(path).parent)])
+
+    def open_logs(self) -> None:
+        from .. import logs
+
+        logs.log_dir().mkdir(parents=True, exist_ok=True)
+        open_external(str(logs.log_dir()))
 
     def clear_cache(self) -> None:
         from .. import cache

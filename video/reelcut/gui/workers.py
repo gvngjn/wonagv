@@ -5,6 +5,7 @@ from typing import Any, Callable
 
 from PySide6.QtCore import QThread, Signal
 
+from .. import logs
 from ..ffmpeg import Cancelled
 
 
@@ -29,6 +30,7 @@ class TaskThread(QThread):
             if self._cancelled:
                 self.failed.emit("취소했어요.")
             else:
+                logs.exception("작업 실패", e)
                 self.failed.emit(str(e) or e.__class__.__name__)
             return
         if self._cancelled:

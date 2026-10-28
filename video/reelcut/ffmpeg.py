@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 import subprocess
@@ -229,6 +230,8 @@ class ProcessRunner:
             raise Cancelled()
         if proc.returncode != 0:
             detail = "".join(stderr_lines[-25:])
+            logging.getLogger("reelcut").error("ffmpeg 실패 (코드 %s)\n명령: %s\n%s", proc.returncode,
+                                               " ".join(str(a) for a in cmd), "".join(stderr_lines[-60:]))
             hint = friendly_message(detail)
             raise FFmpegError((hint + "\n\n[자세한 내용]\n" if hint else "ffmpeg 실행 실패:\n") + detail)
 
