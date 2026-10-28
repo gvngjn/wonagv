@@ -47,8 +47,24 @@ QUALITIES = [("높음 (파일 큼)", 18), ("보통", 21), ("작은 파일", 26)]
 FPS_CHOICES = [24.0, 25.0, 30.0, 60.0]
 
 
+def open_external(path: str | None) -> None:
+    """운영체제 기본 프로그램으로 파일 열기."""
+    import subprocess
+    import sys
+
+    if not path or not Path(path).exists():
+        return
+    if sys.platform == "win32":
+        os.startfile(os.path.normpath(path))          # noqa: S606
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", path])
+    else:
+        subprocess.Popen(["xdg-open", path])
+
+
 class Preview(QWidget):
     """간단한 재생기 (클립 확인, 미리보기 결과 재생)."""
+    current_path: str | None = None
 
     def __init__(self) -> None:
         super().__init__()
@@ -78,6 +94,12 @@ class Preview(QWidget):
         ctl.addWidget(self.play_btn)
         ctl.addWidget(self.slider, 1)
         ctl.addWidget(self.time)
+        self.external_btn = QPushButton("↗")
+        self.external_btn.setFixedWidth(30)
+        self.external_btn.setToolTip("Windows 기본 플레이어로 열기 (앱 재생기에서 소리가 이상할 때 비교용)")
+        self.external_btn.setEnabled(False)
+        self.external_btn.clicked.connect(lambda: open_external(self.current_path))
+        ctl.addWidget(self.external_btn)
         ctl.addWidget(AudioOutputPicker())
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -86,6 +108,8 @@ class Preview(QWidget):
         lay.addWidget(self.title)
 
     def load(self, path: str, start: float = 0.0, autoplay: bool = False, title: str = "") -> None:
+        self.current_path = path
+        self.external_btn.setEnabled(True)
         self.player.setSource(QUrl.fromLocalFile(path))
         self.title.setText(title or Path(path).name)
         if start > 0:
@@ -562,11 +586,14 @@ class MainWindow(QMainWindow):
                 box = QMessageBox(self)
                 box.setWindowTitle("ReelCut")
                 box.setText(f"영상을 만들었어요!\n{path}")
+                play_btn = box.addButton("재생", QMessageBox.ActionRole)
                 open_btn = box.addButton("폴더 열기", QMessageBox.ActionRole)
                 box.addButton("확인", QMessageBox.AcceptRole)
                 box.exec()
                 if box.clickedButton() is open_btn:
                     self._reveal(path)
+                elif box.clickedButton() is play_btn:
+                    open_external(path)
 
         self._start(work, done, "미리보기 만드는 중…" if preview else "영상 만드는 중…")
 
