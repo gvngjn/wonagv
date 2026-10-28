@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 from openpyxl import Workbook
@@ -14,6 +15,7 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.table import Table, TableStyleInfo
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 FONT = "Arial"
 HEADER_FILL = PatternFill("solid", fgColor="FF8C28")
 THIN = Side(style="thin", color="D0D0D0")
@@ -136,7 +138,9 @@ def main() -> None:
     data = json.loads((ROOT / "devlog.json").read_text(encoding="utf-8"))
     build_xlsx(data, ROOT / "DEVLOG.xlsx")
     build_md(data, ROOT / "DEVLOG.md")
-    print("DEVLOG.xlsx / DEVLOG.md 갱신")
+    from make_devlog_html import build_html
+    build_html(data, ROOT / "DEVLOG.html")
+    print("DEVLOG.xlsx / DEVLOG.md / DEVLOG.html 갱신")
 
 
 if __name__ == "__main__":
