@@ -7,12 +7,10 @@ from pathlib import Path
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QKeySequence, QPainter, QPen, QShortcut
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QCheckBox, QComboBox, QDateTimeEdit, QDoubleSpinBox, QFileDialog,
-    QFontComboBox,
-    QFormLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-    QMenu, QMessageBox, QProgressDialog, QPushButton, QSizePolicy, QSlider, QSpinBox, QTableWidget,
-    QTableWidgetItem,
-    QVBoxLayout, QWidget,
+    QAbstractItemView, QApplication, QCheckBox, QComboBox, QDateEdit, QDateTimeEdit, QDialog,
+    QDialogButtonBox, QDoubleSpinBox, QFileDialog, QFontComboBox, QFormLayout, QGroupBox, QHBoxLayout,
+    QHeaderView, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu, QMessageBox, QProgressDialog,
+    QPushButton, QSizePolicy, QSlider, QSpinBox, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from .. import subtitles as subs
@@ -114,6 +112,59 @@ def delete_key(widget: QWidget, fn) -> None:
     """목록에서 Delete(맥: Backspace) 키로 선택한 항목 지우기. 칸을 고치는 중에는 그대로 글자 지우기."""
     for key in (QKeySequence.Delete, QKeySequence(Qt.Key_Backspace)):
         QShortcut(key, widget, fn, context=Qt.WidgetShortcut)
+
+
+class FolderAddDialog(QDialog):
+    """폴더 추가 전에: 몇 개 찾았는지 보여 주고, 날짜 범위로 고를지 (예: 2026년만)."""
+
+    def __init__(self, count: int, parent=None) -> None:
+        from PySide6.QtCore import QDate
+
+        super().__init__(parent)
+        self.setWindowTitle("폴더에서 추가")
+        year = QDate.currentDate().year()
+        self.use_range = QCheckBox("찍은 날짜로 고르기")
+        self.start = QDateEdit(QDate(year, 1, 1))
+        self.end = QDateEdit(QDate(year, 12, 31))
+        for e in (self.start, self.end):
+            e.setCalendarPopup(True)
+            e.setDisplayFormat("yyyy-MM-dd")
+            e.dateChanged.connect(lambda _d: self.use_range.setChecked(True))
+        this_year = QPushButton(f"{year}년")
+        last_year = QPushButton(f"{year - 1}년")
+        this_year.clicked.connect(lambda: self._set_year(year))
+        last_year.clicked.connect(lambda: self._set_year(year - 1))
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.button(QDialogButtonBox.Ok).setText("추가")
+        buttons.button(QDialogButtonBox.Cancel).setText("취소")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        lay = QVBoxLayout(self)
+        lay.addWidget(QLabel(f"영상·사진 {count}개를 찾았어요. 찍은 날짜순으로 추가해요."))
+        lay.addWidget(self.use_range)
+        lay.addWidget(row(self.start, QLabel("~"), self.end, this_year, last_year, None))
+        note = QLabel("날짜 정보가 없는 파일은 범위와 상관없이 추가하고, 언제 찍었는지 물어봐요.")
+        note.setStyleSheet("color: gray")
+        note.setWordWrap(True)
+        lay.addWidget(note)
+        lay.addWidget(buttons)
+
+    def _set_year(self, year: int) -> None:
+        from PySide6.QtCore import QDate
+
+        self.start.setDate(QDate(year, 1, 1))
+        self.end.setDate(QDate(year, 12, 31))
+        self.use_range.setChecked(True)
+
+    def date_range(self) -> tuple[float, float] | None:
+        """(시작 시각, 끝 다음날 0시) 유닉스 시간, 고르지 않으면 None."""
+        if not self.use_range.isChecked():
+            return None
+        from PySide6.QtCore import QDateTime, QTime
+
+        lo = QDateTime(self.start.date(), QTime(0, 0)).toSecsSinceEpoch()
+        hi = QDateTime(self.end.date().addDays(1), QTime(0, 0)).toSecsSinceEpoch()
+        return float(lo), float(hi)
 
 
 class ClipsPanel(QWidget):
@@ -262,7 +313,8 @@ class ClipsPanel(QWidget):
             if item.data(Qt.UserRole + 1) == key:
                 item.setIcon(QIcon(pm))
 
-    def add_files(self, paths: list[str], sort_new: bool = False) -> None:
+    def add_files(self, paths: list[str], sort_new: bool = False,
+                  date_range: tuple[float, float] | None = None) -> None:
         errors = []
         new: list[Clip] = []
         progress = None
@@ -285,6 +337,13 @@ class ClipsPanel(QWidget):
                 errors.append(str(e))
         if progress:
             progress.close()
+        skipped = 0
+        if date_range:
+            # 찍은 날짜가 확실한 것만 범위로 거른다 (날짜를 모르는 건 아래에서 물어본다)
+            lo, hi = date_range
+            kept = [c for c in new if c.shot_source == "file" or lo <= c.shot_at < hi]
+            skipped = len(new) - len(kept)
+            new = kept
         unknown = [c for c in new if c.shot_source == "file"]
         if unknown:
             from .shot_time_dialog import ShotTimeDialog
@@ -296,6 +355,8 @@ class ClipsPanel(QWidget):
         self.reload()
         self.list.setCurrentRow(len(self.project.clips) - 1)
         self.changed.emit()
+        if skipped:
+            QMessageBox.information(self, "클립 추가", f"{len(new)}개를 추가했어요. 날짜 범위 밖의 {skipped}개는 뺐어요.")
         if errors:
             QMessageBox.warning(self, "추가하지 못한 파일", "\n".join(errors))
 
@@ -312,7 +373,10 @@ class ClipsPanel(QWidget):
         if not paths:
             QMessageBox.information(self, "ReelCut", "이 폴더에는 영상이나 사진이 없어요.")
             return
-        self.add_files(paths, sort_new=True)
+        dlg = FolderAddDialog(len(paths), self)
+        if not dlg.exec():
+            return
+        self.add_files(paths, sort_new=True, date_range=dlg.date_range())
 
     def sort_by_date(self) -> None:
         if len(self.project.clips) < 2:
