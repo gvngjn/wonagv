@@ -334,6 +334,36 @@ def _ass_escape(text: str) -> str:
             .replace("\r", "").replace("\n", "\\N"))
 
 
+SUB_ANIMATIONS = {
+    "fade": r"{\fad(150,150)}",
+    # 작게 시작 → 살짝 크게 → 원래 크기 (0.18초)
+    "pop": r"{\fad(60,120)\fscx70\fscy70\t(0,90,\fscx112\fscy112)\t(90,180,\fscx100\fscy100)}",
+}
+
+
+def animated_subs_ass(entries, animation: str) -> str:
+    """등장 효과를 넣은 자막 ASS 파일 내용.
+
+    ffmpeg가 SRT를 읽을 때 만드는 머리말(384×288 좌표)과 똑같이 맞춰서
+    글자 크기·위치 스타일(force_style)은 SRT로 입힐 때와 그대로 나온다.
+    """
+    tag = SUB_ANIMATIONS.get(animation, "")
+    lines = [
+        "[Script Info]", "ScriptType: v4.00+", "PlayResX: 384", "PlayResY: 288",
+        "ScaledBorderAndShadow: yes", "YCbCr Matrix: None", "",
+        "[V4+ Styles]",
+        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, "
+        "Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, "
+        "MarginL, MarginR, MarginV, Encoding",
+        "Style: Default,Arial,16,&Hffffff,&Hffffff,&H0,&H0,0,0,0,0,100,100,0,0,1,1,0,2,10,10,10,1", "",
+        "[Events]",
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+    ]
+    for e in entries:
+        lines.append(f"Dialogue: 0,{_ass_time(e.start)},{_ass_time(e.end)},Default,,0,0,0,,{tag}{_ass_escape(e.text)}")
+    return "\n".join(lines) + "\n"
+
+
 def titles_ass(t: TitleSettings, w: int, h: int) -> str:
     """제목용 ASS 자막 파일 내용 (화면 크기 그대로를 좌표로 사용)."""
     size = max(8, int(round(h * t.size / 100)))
@@ -809,9 +839,14 @@ class Renderer:
             srt_name = None
             titles_name = None
             font_styles = []
-            if project.subtitles.entries:
-                srt_name = "subs.srt"
-                save_srt(work / srt_name, project.subtitles.entries)
+            subs = project.subtitles
+            if subs.entries:
+                if subs.burn_in and subs.animation in SUB_ANIMATIONS:
+                    srt_name = "subs.ass"
+                    (work / srt_name).write_text(animated_subs_ass(subs.entries, subs.animation), encoding="utf-8")
+                else:
+                    srt_name = "subs.srt"
+                    save_srt(work / srt_name, subs.entries)
                 if project.subtitles.burn_in:
                     font_styles.append(project.subtitles)
             if any(e.text.strip() for e in project.titles.entries):

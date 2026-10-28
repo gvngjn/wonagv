@@ -126,6 +126,7 @@ class SubtitleSettings:
     box: bool = False              # 글자 뒤에 반투명 상자
     position: str = "bottom"       # bottom | middle | top
     margin_v: int = 24
+    animation: str = "none"        # 영상에 입힐 때 등장 효과: none | fade(스르륵) | pop(톡 튀어나오기)
     model: str = "small"
     language: str = "ko"           # "" = 자동 감지
     source: str = "video"          # video | music

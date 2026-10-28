@@ -348,3 +348,13 @@ def test_save_still_at_export_size(media, tmp_path):
     png = tmp_path / "logo.png"
     save_still(p, str(png), source=(str(media / "logo.png"), 0.0))
     assert probe(str(png)).width == 1080
+
+
+@needs_ffmpeg
+def test_animated_subtitles_render(media, tmp_path):
+    p = base_project(media)
+    p.subtitles.entries = [SubtitleEntry(0.2, 1.5, "톡 튀어나오는 자막")]
+    p.subtitles.animation = "pop"
+    out = tmp_path / "pop.mp4"
+    Renderer().render(p, str(out), preview=True)
+    assert probe(str(out)).duration == pytest.approx(7.0, abs=0.1)

@@ -1006,6 +1006,10 @@ class SubtitlePanel(QWidget):
         self.burn = QComboBox()
         self.burn.addItem("영상에 입히기 (어디서나 보임)", True)
         self.burn.addItem("자막 트랙으로 넣기 (끄고 켤 수 있음)", False)
+        self.animation = QComboBox()
+        for key, label in (("none", "없음"), ("fade", "스르륵 나타나기"), ("pop", "톡 튀어나오기")):
+            self.animation.addItem(label, key)
+        self.animation.setToolTip("자막이 나타날 때 효과 (영상에 입힐 때만)")
         self.font = QFontComboBox()
         self.font.setToolTip("컴퓨터에 설치된 글꼴")
         font_file_btn = QPushButton("글꼴 파일…")
@@ -1031,7 +1035,7 @@ class SubtitlePanel(QWidget):
         self.margin.setRange(0, 200)
         self.sample = SubtitleSample()
         sf = QFormLayout(style_box)
-        sf.addRow("넣는 방식", self.burn)
+        sf.addRow("넣는 방식", row(self.burn, QLabel("등장 효과"), self.animation))
         sf.addRow("글꼴", row(self.font, font_file_btn))
         sf.addRow("", row(self.font_file_label, None, self.font_file_clear))
         sf.addRow("크기", row(self.font_size, self.bold, None))
@@ -1050,7 +1054,7 @@ class SubtitlePanel(QWidget):
         lay.addWidget(self.warn)
         lay.addWidget(style_box)
 
-        for w in (self.model, self.lang, self.source, self.burn):
+        for w in (self.model, self.lang, self.source, self.burn, self.animation):
             w.currentIndexChanged.connect(self._store)
         self.font.currentFontChanged.connect(self._on_font_picked)
         for w in (self.font_size, self.outline, self.margin):
@@ -1069,6 +1073,8 @@ class SubtitlePanel(QWidget):
         self.lang.setCurrentIndex(max(0, self.lang.findData(s.language)))
         self.source.setCurrentIndex(max(0, self.source.findData(s.source)))
         self.burn.setCurrentIndex(0 if s.burn_in else 1)
+        self.animation.setCurrentIndex(max(0, self.animation.findData(s.animation)))
+        self.animation.setEnabled(s.burn_in)
         from PySide6.QtGui import QFont
         if s.font_file:
             register_font_file(s.font_file)
@@ -1103,6 +1109,8 @@ class SubtitlePanel(QWidget):
         s.language = self.lang.currentData()
         s.source = self.source.currentData()
         s.burn_in = bool(self.burn.currentData())
+        s.animation = self.animation.currentData()
+        self.animation.setEnabled(s.burn_in)
         s.font_size = self.font_size.value()
         s.bold = self.bold.isChecked()
         s.color = self.color_btn.color

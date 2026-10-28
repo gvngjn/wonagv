@@ -303,3 +303,14 @@ def test_frame_source_maps_timeline_to_original():
     assert frame_source(p, 5.0) == ("p.jpg", 0.0)          # 4~7초는 사진
     assert frame_source(p, 8.0) == ("b.mp4", 2.0)          # 2배속: 1초 지나면 원본 2초
     assert frame_source(p, 999)[0] == "b.mp4"              # 끝을 넘어도 마지막 장면
+
+
+def test_animated_subtitles_ass():
+    from reelcut.render import animated_subs_ass
+
+    text = animated_subs_ass([SubtitleEntry(1.0, 2.5, "첫 줄\n{둘째}")], "pop")
+    assert "PlayResY: 288" in text                       # SRT와 같은 좌표 → force_style 크기 그대로
+    line = [l for l in text.splitlines() if l.startswith("Dialogue:")][0]
+    assert line.startswith("Dialogue: 0,0:00:01.00,0:00:02.50,Default,,0,0,0,,{\\fad(60,120)\\fscx70")
+    assert line.endswith("첫 줄\\N\\{둘째\\}")
+    assert "\\fad(150,150)" in animated_subs_ass([SubtitleEntry(0, 1, "a")], "fade")
