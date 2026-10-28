@@ -96,6 +96,9 @@ class BeatSyncSettings:
     use_music_length: bool = True  # 음악 길이만큼 만들기 (아니면 클립을 다 쓸 때까지)
     max_duration: float = 0.0      # 0이면 제한 없음
     cut_mode: str = "regular"      # regular(일정하게) | accent(센 비트에서) | energy(신나는 부분은 빠르게)
+    cut_unit: str = "beats"        # beats(음악 비트마다) | seconds(일정한 초마다)
+    cut_seconds: float = 2.0       # cut_unit=seconds일 때 컷 길이(초)
+    per_clip: bool = False         # 클립마다 한 컷씩만 → 영상 길이 = 클립 개수 × 컷 길이
     transition: str = "none"       # 컷 전환 효과: none | flash(번쩍) | zoom(줌 펀치) | dip(검은 깜빡)
 
 

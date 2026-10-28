@@ -19,7 +19,7 @@ from . import cache
 from .ffmpeg import FFmpegError, ProcessRunner
 from .project import PipOverlay, Project, Segment, SubtitleSettings, TitleSettings
 from .subtitles import save_srt
-from .timeline import build_segments
+from .timeline import beat_sync_active, build_segments
 
 AUDIO_SR = 48000
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".gif"}
@@ -650,7 +650,7 @@ class Renderer:
             out_dir.mkdir(parents=True, exist_ok=True)
             check_free_space(total, opt, work, out_dir)
             bs = project.beat_sync
-            transition = bs.transition if (bs.enabled and project.music.beats) else "none"
+            transition = bs.transition if beat_sync_active(project) else "none"
             files = self._render_segments(segments, work, opt, total, report, transition)
             (work / "list.txt").write_text(concat_list_text(files), encoding="utf-8")
 

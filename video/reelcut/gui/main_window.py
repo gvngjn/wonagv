@@ -577,7 +577,7 @@ class MainWindow(QMainWindow):
         if not self.offer_relink():
             return
         bs = self.project.beat_sync
-        if bs.enabled and not self.project.music.beats:
+        if bs.enabled and bs.cut_unit == "beats" and not self.project.music.beats:
             QMessageBox.information(self, "ReelCut", "비트 맞춤을 쓰려면 음악 탭에서 '비트 분석'을 먼저 해 주세요.")
             return
         self.music.stop_preview()

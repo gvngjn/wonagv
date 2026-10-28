@@ -451,8 +451,17 @@ class MusicPanel(QWidget):
         bf.addRow("비트 위치 조정", self.offset_spin)
 
         # 비트 맞춤 컷
-        sync_box = QGroupBox("노래 비트에 맞춰 잘라 이어붙이기")
-        self.sync_check = QCheckBox("사용하기 (클립을 비트마다 잘라서 화면 전환)")
+        sync_box = QGroupBox("노래 비트(또는 일정한 시간)에 맞춰 잘라 이어붙이기")
+        self.sync_check = QCheckBox("사용하기 (클립을 잘라서 정해진 순간마다 화면 전환)")
+        self.cut_unit = QComboBox()
+        self.cut_unit.addItem("음악 비트마다", "beats")
+        self.cut_unit.addItem("일정한 초마다", "seconds")
+        self.cut_seconds = QDoubleSpinBox()
+        self.cut_seconds.setRange(0.2, 60)
+        self.cut_seconds.setDecimals(1)
+        self.cut_seconds.setSingleStep(0.5)
+        self.cut_seconds.setSuffix(" 초마다")
+        self.cut_seconds.setKeyboardTracking(False)
         self.per_cut = QComboBox()
         for n in (1, 2, 4, 8, 16):
             self.per_cut.addItem(f"{n}비트마다", n)
@@ -472,15 +481,16 @@ class MusicPanel(QWidget):
                            ("줌 펀치 (살짝 확대됐다 돌아옴)", "zoom"), ("검은 깜빡임", "dip")):
             self.transition.addItem(label, key)
         self.length_mode = QComboBox()
-        self.length_mode.addItem("음악 길이만큼", True)
-        self.length_mode.addItem("클립 길이만큼 (최대 음악 길이)", False)
+        self.length_mode.addItem("음악 길이만큼", "music")
+        self.length_mode.addItem("클립 길이만큼 (최대 음악 길이)", "clips")
+        self.length_mode.addItem("클립 개수 × 컷 길이 (클립마다 한 번씩, 노래도 거기서 끝)", "per_clip")
         self.max_spin = seconds_spin(36000, 1, 0)
         self.max_spin.setSpecialValueText("제한 없음")
         self.strip = BeatStrip()
         self.cut_info = QLabel()
         sf = QFormLayout(sync_box)
         sf.addRow(self.sync_check)
-        sf.addRow("화면 전환", self.per_cut)
+        sf.addRow("자르는 기준", row(self.cut_unit, self.per_cut, self.cut_seconds))
         sf.addRow("컷 리듬", self.cut_mode)
         sf.addRow("클립 고르는 방식", row(self.order, self.shuffle_btn))
         sf.addRow("컷 전환 효과", self.transition)
@@ -494,13 +504,13 @@ class MusicPanel(QWidget):
         lay.addWidget(sync_box)
         lay.addStretch(1)
 
-        for w in (self.start_spin, self.fade_spin, self.offset_spin, self.max_spin):
+        for w in (self.start_spin, self.fade_spin, self.offset_spin, self.max_spin, self.cut_seconds):
             w.valueChanged.connect(self._store)
         for w in (self.vol_slider, self.clip_vol_slider):
             w.valueChanged.connect(self._store)
         self.bpm_spin.valueChanged.connect(self._store)
         self.sync_check.toggled.connect(self._store)
-        for w in (self.per_cut, self.order, self.length_mode, self.transition, self.cut_mode):
+        for w in (self.per_cut, self.order, self.length_mode, self.transition, self.cut_mode, self.cut_unit):
             w.currentIndexChanged.connect(self._store)
         self.reload()
 
@@ -517,7 +527,10 @@ class MusicPanel(QWidget):
         self.sync_check.setChecked(bs.enabled)
         self.per_cut.setCurrentIndex(max(0, self.per_cut.findData(bs.beats_per_cut)))
         self.order.setCurrentIndex(max(0, self.order.findData("sequential" if bs.order == "spread" else bs.order)))
-        self.length_mode.setCurrentIndex(0 if bs.use_music_length else 1)
+        self.length_mode.setCurrentIndex(self.length_mode.findData(
+            "per_clip" if bs.per_clip else ("music" if bs.use_music_length else "clips")))
+        self.cut_unit.setCurrentIndex(max(0, self.cut_unit.findData(bs.cut_unit)))
+        self.cut_seconds.setValue(bs.cut_seconds)
         self.transition.setCurrentIndex(max(0, self.transition.findData(bs.transition)))
         self.cut_mode.setCurrentIndex(max(0, self.cut_mode.findData(bs.cut_mode)))
         self.max_spin.setValue(bs.max_duration)
@@ -538,7 +551,11 @@ class MusicPanel(QWidget):
         bs.enabled = self.sync_check.isChecked()
         bs.beats_per_cut = self.per_cut.currentData()
         bs.order = self.order.currentData()
-        bs.use_music_length = bool(self.length_mode.currentData())
+        mode = self.length_mode.currentData()
+        bs.per_clip = mode == "per_clip"
+        bs.use_music_length = mode != "clips"
+        bs.cut_unit = self.cut_unit.currentData()
+        bs.cut_seconds = self.cut_seconds.value()
         bs.transition = self.transition.currentData()
         bs.cut_mode = self.cut_mode.currentData()
         bs.max_duration = self.max_spin.value()
@@ -560,33 +577,48 @@ class MusicPanel(QWidget):
             self.beat_info.setText("아직 분석 전" if m.path else "")
         self.analyze_btn.setEnabled(bool(m.path))
         self.play_btn.setEnabled(bool(m.path))
-        if not m.path:
-            self.strip.set_data([], [], 0)
-            self.cut_info.setText("")
-            self.gauge.set_selection(0.0, 0.0)
-            return
+        bs = self.project.beat_sync
+        seconds = bs.cut_unit == "seconds"
+        self.per_cut.setVisible(not seconds)
+        self.cut_seconds.setVisible(seconds)
+        self.cut_mode.setEnabled(not seconds)
         segs = build_segments(self.project)
         length = max(total_duration(segs), 0.0)
-        cuts = segment_starts(segs)[1:] if self.project.beat_sync.enabled else []
-        view_len = length if length > 0 else max(0.0, m.duration - m.start)
-        beats_rel = [b + m.beat_offset - m.start for b in m.beats]
-        if self.gauge.duration != m.duration:
-            self.gauge.duration = m.duration
-        self.gauge.set_beats([b + m.beat_offset for b in m.beats])
-        self.gauge.set_selection(m.start, length if self.project.clips else 0.0)
-        self.strip.set_data(beats_rel, cuts, view_len)
-        if self.project.beat_sync.enabled:
-            if not m.beats:
-                self.cut_info.setText("먼저 '비트 분석'을 눌러 주세요.")
-            elif not self.project.clips:
-                self.cut_info.setText("클립 탭에서 영상을 추가해 주세요.")
-            else:
-                note = ""
-                if self.project.beat_sync.cut_mode != "regular" and len(m.beat_strengths) != len(m.beats):
-                    note = " · 컷 리듬을 쓰려면 '비트 분석'을 다시 눌러 주세요"
-                self.cut_info.setText(f"컷 {len(segs)}개 · 완성 길이 {fmt_time(length)}{note}")
+        cuts = segment_starts(segs)[1:] if bs.enabled else []
+        if m.path:
+            view_len = length if length > 0 else max(0.0, m.duration - m.start)
+            beats_rel = [b + m.beat_offset - m.start for b in m.beats]
+            if self.gauge.duration != m.duration:
+                self.gauge.duration = m.duration
+            self.gauge.set_beats([b + m.beat_offset for b in m.beats])
+            self.gauge.set_selection(m.start, length if self.project.clips else 0.0)
+            self.strip.set_data(beats_rel, cuts, view_len)
         else:
-            self.cut_info.setText("꺼져 있으면 음악은 배경음으로만 깔려요.")
+            self.gauge.set_selection(0.0, 0.0)
+            self.strip.set_data([], cuts, length if seconds and bs.enabled else 0)
+        usable = [c for c in self.project.clips if c.length > 0.05]
+        if not bs.enabled:
+            self.cut_info.setText("꺼져 있으면 음악은 배경음으로만 깔려요." if m.path else "")
+        elif not seconds and not m.path:
+            self.cut_info.setText("음악을 등록하거나, 자르는 기준을 '일정한 초마다'로 바꿔 주세요.")
+        elif not seconds and not m.beats:
+            self.cut_info.setText("먼저 '비트 분석'을 눌러 주세요.")
+        elif not usable:
+            self.cut_info.setText("클립 탭에서 영상을 추가해 주세요.")
+        elif bs.per_clip:
+            each = f"{bs.cut_seconds:g}초" if seconds else f"{bs.beats_per_cut}비트"
+            text = f"클립 {len(usable)}개 × {each} = 완성 길이 {fmt_time(length)}"
+            if len(segs) < len(usable):
+                text += f" · 음악이 짧아서 클립 {len(segs)}개까지만 들어가요"
+            short = [c.name for c, sg in zip(usable, segs) if c.timeline_length + 1e-6 < sg.duration]
+            if short:
+                text += f" · {len(short)}개 클립은 컷보다 짧아서 마지막 장면이 멈춰 보여요"
+            self.cut_info.setText(text)
+        else:
+            note = ""
+            if not seconds and bs.cut_mode != "regular" and len(m.beat_strengths) != len(m.beats):
+                note = " · 컷 리듬을 쓰려면 '비트 분석'을 다시 눌러 주세요"
+            self.cut_info.setText(f"컷 {len(segs)}개 · 완성 길이 {fmt_time(length)}{note}")
 
     def pick_music(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "음악 선택", "", AUDIO_FILTER)

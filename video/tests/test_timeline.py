@@ -120,3 +120,35 @@ def test_speed_changes_timeline_length_and_source_range():
         assert s.speed == c.speed
         assert c.in_point - 1e-9 <= s.src_start
         assert s.src_start + s.duration * s.speed <= c.end + 1e-9
+
+
+def _eight_clips():
+    lengths = [3.0, 12.5, 7.0, 25.0, 4.2, 9.9, 60.0, 5.5]          # 무작위 길이 8개
+    return [Clip(f"c{i}.mp4", L) for i, L in enumerate(lengths)]
+
+
+def test_per_clip_seconds_total_is_count_times_n():
+    """사용자 요청: 8개 영상을 N초씩 이으면 8×N초에 끝남, 클립마다 한 번씩, 시작 지점부터."""
+    p = Project(clips=_eight_clips())
+    p.music = MusicSettings(path="song.mp3", duration=200.0)
+    p.beat_sync = BeatSyncSettings(enabled=True, cut_unit="seconds", cut_seconds=2.5, per_clip=True)
+    segs = build_segments(p)
+    assert len(segs) == 8
+    assert total_duration(segs) == pytest.approx(20.0)
+    assert [s.path for s in segs] == [f"c{i}.mp4" for i in range(8)]
+    assert all(s.src_start == 0.0 and s.duration == pytest.approx(2.5) for s in segs)
+    p.beat_sync.order = "random"
+    shuffled = build_segments(p)
+    assert sorted(s.path for s in shuffled) == sorted(s.path for s in segs)   # 각 클립 정확히 한 번
+
+
+def test_per_clip_with_beats_and_seconds_without_music():
+    p = Project(clips=_eight_clips())
+    p.music = MusicSettings(path="song.mp3", duration=60.0, beats=[0.5 * i for i in range(120)])
+    p.beat_sync = BeatSyncSettings(enabled=True, beats_per_cut=4, per_clip=True)
+    segs = build_segments(p)
+    assert len(segs) == 8 and total_duration(segs) == pytest.approx(16.0)      # 8 × (4비트 = 2초)
+    # 음악 없이 초 단위도 동작
+    q = Project(clips=_eight_clips())
+    q.beat_sync = BeatSyncSettings(enabled=True, cut_unit="seconds", cut_seconds=1.0)
+    assert total_duration(build_segments(q)) == pytest.approx(sum(c.length for c in q.clips), abs=1.0)

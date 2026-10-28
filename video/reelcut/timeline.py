@@ -182,33 +182,73 @@ def _allocate(durations: list[float], clips: list[Clip]) -> list[int]:
     return counts
 
 
+def beat_sync_active(project: Project) -> bool:
+    """비트(또는 일정 초)에 맞춰 자르는 모드가 실제로 동작하는지."""
+    bs = project.beat_sync
+    if not bs.enabled:
+        return False
+    if bs.cut_unit == "seconds":
+        return bs.cut_seconds > 0
+    return bool(project.music.path and project.music.beats)
+
+
+def per_clip_segments(clips: list[Clip], boundaries: list[float], order: str, seed: int) -> list[Segment]:
+    """클립마다 한 컷: k번째 컷 = k번째 클립의 시작 지점부터 (무작위면 순서만 섞음)."""
+    usable = [c for c in clips if c.length > 0.05]
+    if order == "random":
+        usable = usable[:]
+        random.Random(seed).shuffle(usable)
+    durations = [b - a for a, b in zip(boundaries, boundaries[1:])]
+    return [Segment(c.path, c.in_point, d, c.has_audio, c.speed, c.volume) for c, d in zip(usable, durations)]
+
+
 def build_segments(project: Project) -> list[Segment]:
     clips = project.clips
     bs = project.beat_sync
     music = project.music
-    if not (bs.enabled and music.path and music.beats):
+    fps = project.export.fps
+    if not beat_sync_active(project):
         segs = concat_segments(clips)
         if bs.max_duration > 0:
             segs = _limit(segs, bs.max_duration)
         return segs
 
-    total_clips = sum(c.timeline_length for c in clips)
-    music_left = max(0.0, music.duration - music.start) if music.duration > 0 else total_clips
-    if bs.use_music_length:
+    usable = [c for c in clips if c.length > 0.05]
+    total_clips = sum(c.timeline_length for c in usable)
+    has_music = bool(music.path) and music.duration > 0
+    music_left = max(0.0, music.duration - music.start) if has_music else 0.0
+
+    if bs.per_clip:
+        # 영상 길이 = 클립 개수 × 컷 길이 (음악은 그 지점에서 끝남)
+        end_time = 10 ** 6 if bs.cut_unit == "seconds" or not has_music else music_left
+    elif bs.use_music_length and has_music:
         end_time = music_left
-    else:
+    elif has_music:
         # 비트는 음악이 있는 동안만 있으므로 음악보다 길게 만들지 않는다
-        end_time = min(total_clips, music_left)
+        end_time = min(total_clips, music_left) if bs.cut_unit == "beats" else total_clips
+    else:
+        end_time = total_clips
     if bs.max_duration > 0:
         end_time = min(end_time, bs.max_duration)
-    beats = [b + music.beat_offset for b in music.beats]
-    # 음악 시작 위치 이후의 비트만 골라서 컷 위치 선택
-    keep = [i for i, b in enumerate(beats) if b - music.start > -1e-3]
-    sel = [beats[i] for i in keep]
-    strengths = [music.beat_strengths[i] for i in keep] if len(music.beat_strengths) == len(beats) else None
-    energy = [music.beat_energy[i] for i in keep] if len(music.beat_energy) == len(beats) else None
-    picked = pick_cut_beats(sel, bs.beats_per_cut, bs.cut_mode, strengths, energy)
-    bounds = cut_boundaries(picked, music.start, 1, end_time, project.export.fps)
+
+    if bs.cut_unit == "seconds":
+        step = max(1.0 / fps, bs.cut_seconds)
+        count = len(usable) if bs.per_clip else int(end_time / step + 1e-9) + 1
+        marks = [i * step for i in range(1, count + 1)]
+        bounds = cut_boundaries(marks, 0.0, 1, min(end_time, count * step), fps)
+    else:
+        beats = [b + music.beat_offset for b in music.beats]
+        # 음악 시작 위치 이후의 비트만 골라서 컷 위치 선택
+        keep = [i for i, b in enumerate(beats) if b - music.start > -1e-3]
+        sel = [beats[i] for i in keep]
+        strengths = [music.beat_strengths[i] for i in keep] if len(music.beat_strengths) == len(beats) else None
+        energy = [music.beat_energy[i] for i in keep] if len(music.beat_energy) == len(beats) else None
+        picked = pick_cut_beats(sel, bs.beats_per_cut, bs.cut_mode, strengths, energy)
+        bounds = cut_boundaries(picked, music.start, 1, end_time, fps)
+
+    if bs.per_clip:
+        bounds = bounds[:len(usable) + 1]
+        return per_clip_segments(usable, bounds, bs.order, bs.seed)
     return beat_sync_segments(clips, bounds, bs.order, bs.seed)
 
 
