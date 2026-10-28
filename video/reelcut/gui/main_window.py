@@ -31,6 +31,12 @@ ASPECT_BUTTONS = [
     ("4:5", "▯  인스타 피드\n4:5"),
 ]
 SIZES = [("720p", "720p (가벼움)"), ("1080p", "1080p (추천)"), ("4K", "4K (고화질)")]
+FADES = [
+    ((0.0, 0.0), "페이드 없음"),
+    ((0.0, 1.0), "끝만 서서히 사라지기"),
+    ((0.5, 0.5), "시작·끝 짧게 (0.5초)"),
+    ((1.5, 1.5), "시작·끝 길게 (1.5초)"),
+]
 FITS = [
     ("blur", "흐린 배경으로 채우기"),
     ("crop", "잘라서 꽉 채우기"),
@@ -236,6 +242,11 @@ class MainWindow(QMainWindow):
         self.loud = QCheckBox("음량 자동 맞춤 (유튜브·릴스 권장 크기)")
         self.loud.setToolTip("노래와 원본 소리를 합친 최종 음량을 -14 LUFS로 맞춰요. 너무 작거나 커서 깨지는 걸 막아요.")
         self.loud.toggled.connect(self._store_export)
+        self.fade = QComboBox()
+        for (fi, fo), label in FADES:
+            self.fade.addItem(label, f"{fi}/{fo}")
+        self.fade.setToolTip("영상 시작은 검은 화면에서 나타나고, 끝은 검은 화면으로 사라져요 (소리도 함께)")
+        self.fade.currentIndexChanged.connect(self._store_export)
 
         self.preview_btn = QPushButton("▶ 미리보기 만들기")
         self.preview_btn.setToolTip("작은 화질로 빠르게 만들어서 오른쪽 위에서 재생해요")
@@ -262,7 +273,7 @@ class MainWindow(QMainWindow):
         sl.addWidget(self.quality, 1)
         f.addRow("해상도·화질", settings)
         f.addRow("비율이 다른 영상", row_widget(self.fit, self.size_label))
-        f.addRow("소리", self.loud)
+        f.addRow("시작·끝", row_widget(self.fade, self.loud))
         buttons = QWidget()
         bl = QHBoxLayout(buttons)
         bl.setContentsMargins(0, 0, 0, 0)
@@ -277,7 +288,7 @@ class MainWindow(QMainWindow):
 
     def _load_export_settings(self) -> None:
         ex = self.project.export
-        widgets = (self.size, self.fit, self.fps, self.quality, self.loud)
+        widgets = (self.size, self.fit, self.fps, self.quality, self.loud, self.fade)
         for w in widgets:
             w.blockSignals(True)
         found = find_aspect(ex.width, ex.height)
@@ -290,6 +301,10 @@ class MainWindow(QMainWindow):
         self.size.setCurrentIndex(max(0, self.size.findData(size)))
         self.fit.setCurrentIndex(max(0, self.fit.findData(ex.fit)))
         self.loud.setChecked(bool(ex.loudness))
+        key = f"{float(ex.fade_in)}/{float(ex.fade_out)}"
+        if self.fade.findData(key) < 0:
+            self.fade.addItem(f"사용자 지정 ({ex.fade_in:g}초 / {ex.fade_out:g}초)", key)
+        self.fade.setCurrentIndex(self.fade.findData(key))
         self.fps.setCurrentIndex(max(0, self.fps.findData(ex.fps)))
         qi = self.quality.findData(ex.crf)
         self.quality.setCurrentIndex(qi if qi >= 0 else 1)
@@ -304,6 +319,7 @@ class MainWindow(QMainWindow):
             ex.width, ex.height = ASPECTS[checked.property("aspect")][1][self.size.currentData()]
         ex.fit = self.fit.currentData()
         ex.loudness = -14.0 if self.loud.isChecked() else 0.0
+        ex.fade_in, ex.fade_out = (float(v) for v in self.fade.currentData().split("/"))
         ex.fps = self.fps.currentData()
         ex.crf = self.quality.currentData()
         self._update_size_label()

@@ -143,3 +143,12 @@ def test_loudness_filter_in_final_args():
     p.export.loudness = 0
     args = final_args(p, "list.txt", 5.0, "o.mp4", RenderOptions(640, 360, 30), None)
     assert "loudnorm" not in args[args.index("-filter_complex") + 1]
+
+
+def test_fade_filters():
+    from reelcut.render import fade_filters
+
+    assert fade_filters(0, 0, 10, "v") == ""
+    assert fade_filters(1, 2, 10, "v") == "fade=t=in:st=0:d=1,fade=t=out:st=8:d=2,"
+    assert fade_filters(0, 1, 10, "a") == "afade=t=out:st=9:d=1,"
+    assert fade_filters(5, 5, 4, "v") == "fade=t=in:st=0:d=2,fade=t=out:st=2:d=2,"   # 영상보다 길면 절반으로

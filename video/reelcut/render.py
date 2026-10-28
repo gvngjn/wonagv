@@ -239,6 +239,19 @@ def windows_fonts_option() -> str:
     return f":fontsdir='{escaped}'"
 
 
+def fade_filters(fade_in: float, fade_out: float, total: float, kind: str) -> str:
+    """영상(v)/소리(a) 시작·끝 페이드 필터들 (끝에 쉼표 포함, 없으면 빈 문자열)."""
+    name = "fade" if kind == "v" else "afade"
+    parts = []
+    fi = min(max(0.0, fade_in), total / 2)
+    fo = min(max(0.0, fade_out), total / 2)
+    if fi > 0:
+        parts.append(f"{name}=t=in:st=0:d={_num(fi)}")
+    if fo > 0:
+        parts.append(f"{name}=t=out:st={_num(total - fo)}:d={_num(fo)}")
+    return "".join(p + "," for p in parts)
+
+
 def loudness_filter(target: float) -> str:
     """음량 자동 맞춤 (EBU R128). target=0이면 그대로 통과."""
     if not target:
@@ -311,13 +324,15 @@ def final_args(project: Project, concat_list: str, total: float, out_path: str,
         style = ass_style(subs).replace("'", "")
         vf.append(f"{base}subtitles={srt_name}:charenc=UTF-8{fonts_option(fonts_dir)}:force_style='{style}'[vsub]")
         base = "[vsub]"
-    vf.append(f"{base}format=yuv420p[vout]")
+    vf.append(f"{base}{fade_filters(project.export.fade_in, project.export.fade_out, total, 'v')}"
+              "format=yuv420p[vout]")
 
     if len(mix) > 1:
         af.append(f"{''.join(mix)}amix=inputs={len(mix)}:duration=first:normalize=0[amixed]")
     else:
         af.append("[a0]anull[amixed]")
-    af.append(f"[amixed]{loudness_filter(project.export.loudness)}[aout]")
+    af.append(f"[amixed]{fade_filters(project.export.fade_in, project.export.fade_out, total, 'a')}"
+              f"{loudness_filter(project.export.loudness)}[aout]")
 
     soft_subs = bool(srt_name) and not subs.burn_in
     if soft_subs:
