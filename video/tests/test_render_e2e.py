@@ -333,3 +333,18 @@ def test_gpu_encoder_failure_falls_back_to_cpu(media, tmp_path, monkeypatch):
     assert r.encoder_used == hwenc.SOFTWARE and hwenc.detect() == ""   # 다음부터는 바로 CPU
     p.export.gpu = False
     assert Renderer().render(p, str(tmp_path / "cpu.mp4")) == pytest.approx(7.0)
+
+
+@needs_ffmpeg
+def test_save_still_at_export_size(media, tmp_path):
+    from reelcut.render import save_still
+
+    p = base_project(media)
+    p.export.width, p.export.height, p.export.fit, p.export.color = 1080, 1920, "blur", "warm"
+    out = tmp_path / "thumb.jpg"
+    save_still(p, str(out), t=1.0)
+    info = probe(str(out))
+    assert (info.width, info.height) == (1080, 1920)
+    png = tmp_path / "logo.png"
+    save_still(p, str(png), source=(str(media / "logo.png"), 0.0))
+    assert probe(str(png)).width == 1080

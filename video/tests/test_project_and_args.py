@@ -293,3 +293,13 @@ def test_multi_export_file_names():
     assert multi_output_path("/v/완성.mp4", "9:16").replace("\\", "/") == "/v/완성_릴스.mp4"
     assert multi_output_path("/v/완성", "16:9").replace("\\", "/") == "/v/완성_유튜브.mp4"
     assert multi_output_path("/v/a.b.MP4", "4:5").replace("\\", "/") == "/v/a.b_인스타피드.mp4"
+
+
+def test_frame_source_maps_timeline_to_original():
+    from reelcut.render import frame_source
+
+    p = Project(clips=[Clip("a.mp4", 10, 2, 6), Clip("p.jpg", 0, 0, 3, False), Clip("b.mp4", 10, 0, 10, speed=2.0)])
+    assert frame_source(p, 1.0) == ("a.mp4", 3.0)          # a는 2초부터 사용
+    assert frame_source(p, 5.0) == ("p.jpg", 0.0)          # 4~7초는 사진
+    assert frame_source(p, 8.0) == ("b.mp4", 2.0)          # 2배속: 1초 지나면 원본 2초
+    assert frame_source(p, 999)[0] == "b.mp4"              # 끝을 넘어도 마지막 장면

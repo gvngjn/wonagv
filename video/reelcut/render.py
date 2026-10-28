@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import bisect
 import os
 import shutil
 import tempfile
@@ -20,7 +21,7 @@ from . import hwenc, logs
 from .ffmpeg import Cancelled, FFmpegError, ProcessRunner
 from .project import PipOverlay, Project, Segment, SubtitleSettings, TitleSettings
 from .subtitles import save_srt
-from .timeline import beat_sync_active, build_segments
+from .timeline import beat_sync_active, build_segments, segment_starts
 
 AUDIO_SR = 48000
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".gif"}
@@ -543,6 +544,43 @@ def final_args(project: Project, concat_list: str, total: float, out_path: str,
         out_path,
     ]
     return args
+
+
+def frame_source(project: Project, t: float) -> tuple[str, float]:
+    """완성 영상의 t초 장면이 원본 어느 파일의 몇 초인지."""
+    segs = build_segments(project)
+    if not segs:
+        raise ValueError("클립이 없어요.")
+    starts = segment_starts(segs)
+    k = max(0, min(len(segs) - 1, bisect.bisect_right(starts, t) - 1))
+    seg = segs[k]
+    if is_image(seg.path):
+        return seg.path, 0.0
+    offset = min(max(0.0, t - starts[k]), max(0.0, seg.duration - 0.01))
+    return seg.path, seg.src_start + offset * (seg.speed or 1.0)
+
+
+def still_args(path: str, at: float, out_path: str, project: Project) -> list[str]:
+    """원본 한 장면을 내보내기 크기·화면 맞추기·색감 그대로 이미지로 (자막·제목 없이)."""
+    ex = project.export
+    w, h = ex.width // 2 * 2, ex.height // 2 * 2
+    args = []
+    if at > 0 and not is_image(path):
+        args += ["-ss", _num(at)]
+    graph = fit_graph("[0:v]", "[fit]", w, h, ex.fit) + f";[fit]{color_filter(ex.color)}format=rgb24[v]"
+    args += ["-i", path, "-filter_complex", graph, "-map", "[v]", "-frames:v", "1"]
+    if out_path.lower().endswith((".jpg", ".jpeg")):
+        args += ["-q:v", "2"]
+    return args + ["-update", "1", out_path]
+
+
+def save_still(project: Project, out_path: str, t: float | None = None,
+               source: tuple[str, float] | None = None) -> None:
+    """완성 영상의 t초(또는 원본 파일·시간) 장면을 이미지 파일로 저장 (썸네일용)."""
+    path, at = source if source else frame_source(project, t or 0.0)
+    ProcessRunner().run(still_args(path, at, out_path, project))
+    if not Path(out_path).exists() or Path(out_path).stat().st_size == 0:
+        raise FFmpegError("이미지를 만들지 못했어요.")
 
 
 def concat_list_text(files: list[str]) -> str:

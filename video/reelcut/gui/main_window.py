@@ -11,7 +11,8 @@ from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
-    QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QMainWindow,
+    QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
+    QGroupBox, QHBoxLayout, QLabel, QMainWindow,
     QMessageBox, QProgressBar, QPushButton, QScrollArea, QSlider, QSplitter, QStyle, QTabWidget,
     QVBoxLayout, QWidget,
 )
@@ -148,6 +149,11 @@ class Preview(QWidget):
         self.external_btn.setEnabled(False)
         self.external_btn.clicked.connect(lambda: open_external(self.current_path))
         ctl.addWidget(self.external_btn)
+        self.still_btn = QPushButton("🖼")
+        self.still_btn.setFixedWidth(34)
+        self.still_btn.setToolTip("지금 보이는 장면을 이미지로 저장 (유튜브 썸네일 등)")
+        self.still_btn.setEnabled(False)
+        ctl.addWidget(self.still_btn)
         ctl.addWidget(AudioOutputPicker())
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -158,6 +164,7 @@ class Preview(QWidget):
     def load(self, path: str, start: float = 0.0, autoplay: bool = False, title: str = "") -> None:
         self.current_path = path
         self.external_btn.setEnabled(True)
+        self.still_btn.setEnabled(True)
         self.player.setSource(QUrl.fromLocalFile(path))
         self.title.setText(title or Path(path).name)
         if start > 0:
@@ -237,6 +244,7 @@ class MainWindow(QMainWindow):
         for panel in (self.clips, self.music, self.pips, self.subs, self.titles):
             panel.changed.connect(self._on_changed)
         self.clips.preview_requested.connect(lambda p, s: self.preview.load(p, s))
+        self.preview.still_btn.clicked.connect(self.save_still)
         self.music.analyze_requested.connect(self.analyze_music)
         self.music.music_chosen.connect(self._set_music)
         self.music.download_requested.connect(self.download_music)
@@ -687,6 +695,36 @@ class MainWindow(QMainWindow):
             self.project.export.output = out
         # 작업 중 편집해도 안전하게 복사
         self._run_renders([(Project.from_dict(self.project.to_dict()), out)], preview)
+
+    def save_still(self) -> None:
+        """미리보기에 보이는 장면을 내보내기 크기의 이미지로 (자막·제목 없이)."""
+        from ..render import save_still
+
+        path = getattr(self.preview, "current_path", "")
+        if not path:
+            return
+        t = self.preview.position()
+        self.preview.player.pause()
+        default = str(Path(self.project.export.output or Path.home() / "Videos" / "완성영상.mp4")
+                      .with_name("썸네일.jpg"))
+        out, _ = QFileDialog.getSaveFileName(self, "장면을 이미지로 저장", default,
+                                             "JPG 이미지 (*.jpg);;PNG 이미지 (*.png)")
+        if not out:
+            return
+        if not out.lower().endswith((".jpg", ".jpeg", ".png")):
+            out += ".jpg"
+        # 완성 미리보기를 보고 있으면 타임라인 시간, 클립 원본을 보고 있으면 그 파일의 시간
+        source = None if path == self.preview_file else (path, t)
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            save_still(self.project, out, t=t, source=source)
+        except Exception as e:  # noqa: BLE001 - 사용자에게 알린다
+            QMessageBox.warning(self, "ReelCut", f"이미지를 저장하지 못했어요.\n{e}")
+            return
+        finally:
+            QApplication.restoreOverrideCursor()
+        ex = self.project.export
+        self.status.setText(f"장면 저장 ({ex.width}×{ex.height}): {out}")
 
     def export_multi(self) -> None:
         """같은 영상을 여러 화면 비율로 한 번에 (예: 유튜브 가로 + 릴스 세로)."""
