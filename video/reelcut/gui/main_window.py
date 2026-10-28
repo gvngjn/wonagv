@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import __version__, autosave
+from ..history import History
 from ..textfmt import eta_text
 from ..project import ASPECTS, Project, find_aspect
 from .audio_devices import AudioDeviceManager, AudioOutputPicker
@@ -184,6 +185,14 @@ class MainWindow(QMainWindow):
         self._autosave_timer.setSingleShot(True)
         self._autosave_timer.setInterval(3000)
         self._autosave_timer.timeout.connect(self._do_autosave)
+        # 실행 취소 기록: 편집이 멈추고 0.4초 뒤 한 단계로 기록 (슬라이더를 끌어도 한 번만)
+        self.history = History()
+        self._restoring = False
+        self._history_timer = QTimer(self)
+        self._history_timer.setSingleShot(True)
+        self._history_timer.setInterval(400)
+        self._history_timer.timeout.connect(self._record_history)
+        self._reset_history()
 
     # ---------------------------------------------------------------- UI 구성
     def _build_menu(self) -> None:
@@ -202,6 +211,15 @@ class MainWindow(QMainWindow):
         quit_a = QAction("끝내기", self)
         quit_a.triggered.connect(self.close)
         m.addAction(quit_a)
+        e = self.menuBar().addMenu("편집")
+        self.undo_action = QAction("실행 취소", self)
+        self.undo_action.setShortcut(QKeySequence.Undo)
+        self.undo_action.triggered.connect(self.undo)
+        self.redo_action = QAction("다시 실행", self)
+        self.redo_action.setShortcuts([QKeySequence.Redo, QKeySequence("Ctrl+Shift+Z")])
+        self.redo_action.triggered.connect(self.redo)
+        e.addAction(self.undo_action)
+        e.addAction(self.redo_action)
         h = self.menuBar().addMenu("도움말")
         about = QAction("ReelCut 정보", self)
         about.triggered.connect(lambda: QMessageBox.about(
@@ -342,6 +360,8 @@ class MainWindow(QMainWindow):
         self.dirty = True
         self._update_title()
         self._autosave_timer.start()
+        if not self._restoring:
+            self._history_timer.start()
         if self.sender() is not self.music:
             self.music.reload()   # 클립·fps가 바뀌면 컷 정보도 갱신
 
@@ -562,6 +582,57 @@ class MainWindow(QMainWindow):
         else:
             subprocess.Popen(["xdg-open", str(Path(path).parent)])
 
+    # ---------------------------------------------------------------- 실행 취소
+    def _reset_history(self) -> None:
+        self._history_timer.stop()
+        self.history.reset(self.project.to_dict())
+        self._update_undo_actions()
+
+    def _record_history(self) -> None:
+        self.history.push(self.project.to_dict())
+        self._update_undo_actions()
+
+    def _update_undo_actions(self) -> None:
+        self.undo_action.setEnabled(self.history.can_undo)
+        self.redo_action.setEnabled(self.history.can_redo)
+
+    def _flush_history(self) -> None:
+        if self._history_timer.isActive():
+            self._history_timer.stop()
+            self._record_history()
+
+    def undo(self) -> None:
+        self._flush_history()
+        state = self.history.undo()
+        if state is not None:
+            self._apply_state(state, "실행 취소했어요.")
+
+    def redo(self) -> None:
+        self._flush_history()
+        state = self.history.redo()
+        if state is not None:
+            self._apply_state(state, "다시 실행했어요.")
+
+    def _apply_state(self, state: dict, message: str) -> None:
+        if self.task and self.task.isRunning():
+            QMessageBox.information(self, "ReelCut", "작업이 끝난 뒤에 해 주세요.")
+            return
+        old_music = self.project.music.path
+        self._restoring = True
+        try:
+            self.project = Project.from_dict(state)
+            self._reload_all()
+        finally:
+            self._restoring = False
+        self.dirty = True
+        self._update_title()
+        self._autosave_timer.start()
+        if self.project.music.path != old_music:
+            self.music.set_waveform([])
+            self.load_music_waveform()
+        self._update_undo_actions()
+        self.status.setText(message)
+
     # ---------------------------------------------------------------- 자동 저장 / 복구
     def _do_autosave(self) -> None:
         if not self.dirty:
@@ -588,6 +659,7 @@ class MainWindow(QMainWindow):
         self.project = rec.project
         self.project_path = rec.original_path
         self._reload_all()
+        self._reset_history()
         self.dirty = True
         self._update_title()
         self.load_music_waveform()
@@ -612,6 +684,7 @@ class MainWindow(QMainWindow):
             self.dirty = False
             self.music.set_waveform([])
             self._reload_all()
+            self._reset_history()
 
     def open_project(self) -> None:
         if not self._confirm_discard():
@@ -631,6 +704,7 @@ class MainWindow(QMainWindow):
         self.music.set_waveform([])
         self._reload_all()
         self.offer_relink()
+        self._reset_history()
         self.load_music_waveform()
 
     def offer_relink(self) -> bool:
