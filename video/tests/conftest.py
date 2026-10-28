@@ -7,6 +7,11 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+# 테스트가 사용자 폴더(자동 저장·캐시)를 건드리지 않게
+import tempfile  # noqa: E402
+import os  # noqa: E402
+os.environ.setdefault("REELCUT_DATA_DIR", tempfile.mkdtemp(prefix="reelcut_test_data_"))
+
 HAS_FFMPEG = shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
 needs_ffmpeg = pytest.mark.skipif(not HAS_FFMPEG, reason="ffmpeg가 설치되어 있지 않음")
 

@@ -225,3 +225,51 @@ def test_verify_output_detects_problems(media):
     assert verify_output(a, RenderOptions(320, 240, 30), 4.0) == []
     probs = verify_output(media / "b_silent.mp4", RenderOptions(320, 240, 30), 10.0)
     assert any("크기" in p for p in probs) and any("소리" in p for p in probs) and any("길이" in p for p in probs)
+
+
+@needs_ffmpeg
+def test_segment_cache_reuse_and_invalidation(media, tmp_path, monkeypatch):
+    import shutil as sh
+
+    monkeypatch.setenv("REELCUT_DATA_DIR", str(tmp_path / "data"))
+    src = tmp_path / "클립.mp4"
+    sh.copy(media / "a.mp4", src)
+    i = probe(str(src))
+    p = Project(clips=[Clip(str(src), i.duration, 0, 3, True, i.width, i.height)])
+    p.export.width, p.export.height = 160, 90
+    r1 = Renderer()
+    r1.render(p, str(tmp_path / "1.mp4"))
+    assert r1.cache_hits == 0
+    p.subtitles.entries = [SubtitleEntry(0, 1, "자막만 바뀜")]
+    r2 = Renderer()
+    r2.render(p, str(tmp_path / "2.mp4"))
+    assert r2.cache_hits == 1                                 # 조각 재사용
+    import os, time
+    os.utime(src, (time.time() + 100, time.time() + 100))     # 원본이 바뀌면 다시 만든다
+    r3 = Renderer()
+    r3.render(p, str(tmp_path / "3.mp4"))
+    assert r3.cache_hits == 0
+    p.clips[0].in_point = 0.5                                 # 자르기를 바꿔도 다시 만든다
+    r4 = Renderer()
+    r4.render(p, str(tmp_path / "4.mp4"))
+    assert r4.cache_hits == 0
+    assert probe(str(tmp_path / "4.mp4")).duration == pytest.approx(2.5, abs=0.1)
+
+
+def test_cache_prune(tmp_path, monkeypatch):
+    import os
+    import time
+
+    from reelcut import cache
+
+    monkeypatch.setenv("REELCUT_DATA_DIR", str(tmp_path))
+    d = cache.cache_dir()
+    d.mkdir(parents=True)
+    for k in range(5):
+        f = d / f"{k}.mkv"
+        f.write_bytes(b"x" * 1000)
+        os.utime(f, (time.time() + k, time.time() + k))       # 0이 가장 오래됨
+    cache.prune(limit=2500)
+    assert sorted(f.name for f in d.glob("*.mkv")) == ["3.mkv", "4.mkv"]
+    cache.clear()
+    assert cache.size() == 0

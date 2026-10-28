@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+from . import cache
 from .ffmpeg import FFmpegError, ProcessRunner
 from .project import PipOverlay, Project, Segment, SubtitleSettings, TitleSettings
 from .subtitles import save_srt
@@ -512,7 +513,7 @@ def default_workers() -> int:
 class Renderer:
     """프로젝트를 mp4로 렌더링. on_progress(0~1, 상태 메시지)."""
 
-    def __init__(self, workers: int | None = None) -> None:
+    def __init__(self, workers: int | None = None, use_cache: bool = True) -> None:
         self.runner = ProcessRunner()
         self.workers = workers or default_workers()
         self._runners: list[ProcessRunner] = [self.runner]
@@ -520,6 +521,8 @@ class Renderer:
         self._cancelled = False
         self._w1 = 0.5
         self.problems: list[str] = []     # 결과 자동 검사에서 찾은 문제
+        self.use_cache = use_cache
+        self.cache_hits = 0
 
     def cancel(self) -> None:
         with self._lock:
@@ -560,16 +563,25 @@ class Renderer:
                 progress[i] = min(seg.duration, t)
                 show()
 
-            try:
-                # 첫 조각은 '컷'이 아니므로 효과를 걸지 않는다
-                runner.run(segment_args(seg, str(out), opt, transition if i > 0 else "none"), on_time)
-            except FFmpegError as e:
-                raise FFmpegError(f"'{Path(seg.path).name}' 처리 중 문제가 생겼어요.\n{e}") from e
+            # 첫 조각은 '컷'이 아니므로 효과를 걸지 않는다
+            args = segment_args(seg, str(out), opt, transition if i > 0 else "none")
+            key = cache.segment_key(args, str(out), [seg.path]) if self.use_cache else ""
+            hit = cache.lookup(key) if key else None
+            if hit is not None:
+                result = hit
+                with lock:
+                    self.cache_hits += 1
+            else:
+                try:
+                    runner.run(args, on_time)
+                except FFmpegError as e:
+                    raise FFmpegError(f"'{Path(seg.path).name}' 처리 중 문제가 생겼어요.\n{e}") from e
+                result = cache.store(key, out) if key else out
             with lock:
                 progress[i] = seg.duration
                 finished[0] += 1
             show()
-            return out.name
+            return str(result)
 
         show()
         if self.workers <= 1 or n <= 1:
@@ -652,6 +664,8 @@ class Renderer:
             finally:
                 if part.exists():
                     part.unlink(missing_ok=True)
+            if self.use_cache:
+                cache.prune(keep={Path(f) for f in files})
             report(0.995, "결과 확인 중")
             self.problems = verify_output(out_final, opt, total)
             report(1.0, "완료")

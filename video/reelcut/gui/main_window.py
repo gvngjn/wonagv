@@ -232,6 +232,10 @@ class MainWindow(QMainWindow):
             a.triggered.connect(fn)
             m.addAction(a)
         m.addSeparator()
+        clear_cache = QAction("임시 조각 지우기…", self)
+        clear_cache.triggered.connect(self.clear_cache)
+        m.addAction(clear_cache)
+        m.addSeparator()
         quit_a = QAction("끝내기", self)
         quit_a.triggered.connect(self.close)
         m.addAction(quit_a)
@@ -608,6 +612,17 @@ class MainWindow(QMainWindow):
             subprocess.Popen(["open", "-R", path])
         else:
             subprocess.Popen(["xdg-open", str(Path(path).parent)])
+
+    def clear_cache(self) -> None:
+        from .. import cache
+
+        mb = cache.size() / 1024 ** 2
+        if QMessageBox.question(
+                self, "임시 조각 지우기",
+                f"미리보기·내보내기를 빠르게 하려고 저장해 둔 조각이 {mb:.0f}MB 있어요.\n"
+                "지워도 영상에는 문제없고, 다음 렌더링이 처음 한 번 느려질 뿐이에요.\n\n지울까요?") == QMessageBox.Yes:
+            cache.clear()
+            self.status.setText("임시 조각을 지웠어요.")
 
     # ---------------------------------------------------------------- 실행 취소
     def _reset_history(self) -> None:
