@@ -197,3 +197,31 @@ def test_render_with_title(media, tmp_path):
     out = tmp_path / "title.mp4"
     Renderer().render(p, str(out), preview=True)
     assert probe(str(out)).duration == pytest.approx(7.0, abs=0.1)
+
+
+def test_free_space_check(tmp_path, monkeypatch):
+    import shutil as sh
+    from collections import namedtuple
+
+    from reelcut.render import NotEnoughSpaceError, RenderOptions, check_free_space, estimate_space
+
+    opt = RenderOptions(1080, 1920, 30)
+    temp, final = estimate_space(240, opt)
+    assert 300e6 < temp < 1500e6 and final < temp            # 4분 세로 1080p: 수백 MB
+    Usage = namedtuple("Usage", "total used free")
+    monkeypatch.setattr(sh, "disk_usage", lambda p: Usage(1, 1, 10 * 1024 ** 2))   # 10MB 남음
+    with pytest.raises(NotEnoughSpaceError) as e:
+        check_free_space(240, opt, tmp_path, tmp_path)
+    assert "디스크 공간" in str(e.value)
+    monkeypatch.setattr(sh, "disk_usage", lambda p: Usage(1, 1, 100 * 1024 ** 3))
+    check_free_space(240, opt, tmp_path, tmp_path)           # 100GB면 통과
+
+
+@needs_ffmpeg
+def test_verify_output_detects_problems(media):
+    from reelcut.render import RenderOptions, verify_output
+
+    a = media / "a.mp4"                                        # 320x240, 4초, 소리 있음
+    assert verify_output(a, RenderOptions(320, 240, 30), 4.0) == []
+    probs = verify_output(media / "b_silent.mp4", RenderOptions(320, 240, 30), 10.0)
+    assert any("크기" in p for p in probs) and any("소리" in p for p in probs) and any("길이" in p for p in probs)

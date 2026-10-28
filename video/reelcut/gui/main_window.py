@@ -530,6 +530,10 @@ class MainWindow(QMainWindow):
 
         def done(path: str) -> None:
             self.progress.setValue(1000)
+            if renderer.problems:
+                QMessageBox.warning(self, "결과 확인", "만들어진 영상에서 이상한 점을 찾았어요:\n\n"
+                                    + "\n".join(f"· {p}" for p in renderer.problems)
+                                    + "\n\n같은 설정으로 다시 만들어도 그러면 알려 주세요.")
             if preview:
                 self.status.setText("미리보기 완성! 위에서 재생 중이에요.")
                 self.preview.load(path, autoplay=True, title="미리보기 (저화질)")

@@ -446,6 +446,58 @@ class MissingFilesError(FileNotFoundError):
         super().__init__(f"찾을 수 없는 파일이 있어요 (옮기거나 지웠나요?):\n{names}{more}")
 
 
+class NotEnoughSpaceError(OSError):
+    pass
+
+
+def estimate_space(total: float, opt: "RenderOptions") -> tuple[int, int]:
+    """(임시 조각에 필요한 바이트, 결과 파일 바이트) 대략 추정 — 넉넉하게 잡는다."""
+    px = opt.width * opt.height * opt.fps
+    # 실제 폰 영상은 테스트 영상보다 압축이 덜 되므로 실측(합성 영상)의 약 2.5배로 잡음
+    temp = total * (px * 0.30 + 1_600_000) / 8       # 고화질 조각 + PCM 소리
+    final = total * (px * 0.15 + 200_000) / 8
+    return int(temp), int(final)
+
+
+def check_free_space(total: float, opt: "RenderOptions", work_dir: Path, out_dir: Path) -> None:
+    temp, final = estimate_space(total, opt)
+    need: dict[int, int] = {}
+    free: dict[int, int] = {}
+    for path, size in ((work_dir, temp), (out_dir, final)):
+        try:
+            dev = os.stat(path).st_dev        # 같은 드라이브면 합쳐서 계산
+            free[dev] = shutil.disk_usage(path).free
+        except OSError:
+            continue
+        need[dev] = need.get(dev, 0) + size
+    for key, n in need.items():
+        if free[key] < n:
+            gb = lambda b: f"{b / 1024 ** 3:.1f}GB"  # noqa: E731
+            raise NotEnoughSpaceError(
+                f"디스크 공간이 부족할 것 같아요. 필요: 약 {gb(n)} / 남은 공간: {gb(free[key])}\n"
+                "공간을 비우거나, 해상도를 낮추거나, 다른 드라이브에 저장해 주세요.")
+
+
+def verify_output(path: Path, opt: "RenderOptions", total: float) -> list[str]:
+    """내보낸 결과를 다시 열어 길이·화면 크기·소리를 확인. 문제 목록(없으면 빈 목록)."""
+    from .ffmpeg import probe
+
+    try:
+        info = probe(str(path))
+    except Exception as e:  # noqa: BLE001
+        return [f"결과 파일을 열 수 없어요: {e}"]
+    problems = []
+    if not info.has_video:
+        problems.append("결과에 영상이 없어요.")
+    elif (info.width, info.height) != (opt.width, opt.height):
+        problems.append(f"화면 크기가 {info.width}×{info.height}예요 (원래 {opt.width}×{opt.height}).")
+    if not info.has_audio:
+        problems.append("결과에 소리 트랙이 없어요.")
+    if abs(info.duration - total) > max(0.25, 2 / opt.fps):
+        problems.append(f"길이가 {info.duration:.2f}초예요 (원래 {total:.2f}초).")
+    return problems
+
+
 def temp_output_path(out_path: str) -> Path:
     """완성되기 전까지 쓰는 임시 결과 파일 (같은 폴더, 숨김 이름)."""
     p = Path(out_path)
@@ -467,6 +519,7 @@ class Renderer:
         self._lock = threading.Lock()
         self._cancelled = False
         self._w1 = 0.5
+        self.problems: list[str] = []     # 결과 자동 검사에서 찾은 문제
 
     def cancel(self) -> None:
         with self._lock:
@@ -554,7 +607,11 @@ class Renderer:
         total = sum(max(1, int(round(s.duration * opt.fps))) / opt.fps for s in segments)
         work = Path(tempfile.mkdtemp(prefix="reelcut_"))
         report = on_progress or (lambda f, m: None)
+        self.problems = []
         try:
+            out_dir = Path(out_path).resolve().parent
+            out_dir.mkdir(parents=True, exist_ok=True)
+            check_free_space(total, opt, work, out_dir)
             bs = project.beat_sync
             transition = bs.transition if (bs.enabled and project.music.beats) else "none"
             files = self._render_segments(segments, work, opt, total, report, transition)
@@ -595,6 +652,8 @@ class Renderer:
             finally:
                 if part.exists():
                     part.unlink(missing_ok=True)
+            report(0.995, "결과 확인 중")
+            self.problems = verify_output(out_final, opt, total)
             report(1.0, "완료")
             return total
         finally:
