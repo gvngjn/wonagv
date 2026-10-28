@@ -129,6 +129,11 @@ class Preview(QWidget):
     def position(self) -> float:
         return self.player.position() / 1000
 
+    def seek(self, delta: float) -> None:
+        if self.player.duration() > 0:
+            ms = int(self.player.position() + delta * 1000)
+            self.player.setPosition(max(0, min(self.player.duration(), ms)))
+
     def toggle(self) -> None:
         if self.player.playbackState() == QMediaPlayer.PlayingState:
             self.player.pause()
@@ -257,6 +262,23 @@ class MainWindow(QMainWindow):
         self.redo_action.triggered.connect(self.redo)
         e.addAction(self.undo_action)
         e.addAction(self.redo_action)
+        # 재생 · 만들기 (글자 입력 칸에서는 스페이스가 그대로 입력돼요)
+        v = self.menuBar().addMenu("재생")
+        for text, keys, fn in (
+            ("재생 / 일시정지", ["Space"], self.preview.toggle),
+            ("5초 뒤로", ["Ctrl+Left"], lambda: self.preview.seek(-5)),
+            ("5초 앞으로", ["Ctrl+Right"], lambda: self.preview.seek(5)),
+            (None, None, None),
+            ("미리보기 만들기", ["F5", "Ctrl+R"], lambda: self.render(preview=True)),
+            ("영상 내보내기…", ["Ctrl+E"], lambda: self.render(preview=False)),
+        ):
+            if text is None:
+                v.addSeparator()
+                continue
+            a = QAction(text, self)
+            a.setShortcuts([QKeySequence(k) for k in keys])
+            a.triggered.connect(fn)
+            v.addAction(a)
         h = self.menuBar().addMenu("도움말")
         logs_a = QAction("오류 기록 폴더 열기", self)
         logs_a.triggered.connect(self.open_logs)
@@ -313,10 +335,11 @@ class MainWindow(QMainWindow):
         self.fade.currentIndexChanged.connect(self._store_export)
 
         self.preview_btn = QPushButton("▶ 미리보기 만들기")
-        self.preview_btn.setToolTip("작은 화질로 빠르게 만들어서 오른쪽 위에서 재생해요")
+        self.preview_btn.setToolTip("작은 화질로 빠르게 만들어서 오른쪽 위에서 재생해요 (F5)")
         self.preview_btn.clicked.connect(lambda: self.render(preview=True))
         self.export_btn = QPushButton("💾 영상 내보내기…")
         self.export_btn.setStyleSheet("font-weight: bold; padding: 6px 14px")
+        self.export_btn.setToolTip("원래 화질로 영상 파일을 만들어요 (Ctrl+E)")
         self.export_btn.clicked.connect(lambda: self.render(preview=False))
         self.cancel_btn = QPushButton("취소")
         self.cancel_btn.setEnabled(False)
@@ -571,6 +594,8 @@ class MainWindow(QMainWindow):
     def render(self, preview: bool) -> None:
         from ..render import Renderer
 
+        if not self.preview_btn.isEnabled():  # 다른 작업 중 (단축키로 눌렀을 때)
+            return
         if not self.project.clips:
             QMessageBox.information(self, "ReelCut", "클립을 먼저 추가해 주세요.")
             return

@@ -1,7 +1,7 @@
 """음악 파형 위에서 '몇 초부터 쓸지'를 고르는 게이지 + 미리듣기."""
 from __future__ import annotations
 
-from PySide6.QtCore import QRectF, Qt, QUrl, Signal
+from PySide6.QtCore import QEvent, QRectF, Qt, QUrl, Signal
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
@@ -168,6 +168,13 @@ class MusicGauge(QWidget):
     def mouseDoubleClickEvent(self, e) -> None:
         if self.duration > 0:
             self.play_requested.emit(self._t(e.position().x()))
+
+    def event(self, e) -> bool:
+        # 창 전체 단축키(스페이스 재생, Ctrl+←/→)보다 게이지 조작이 먼저
+        if e.type() == QEvent.ShortcutOverride and e.key() in (Qt.Key_Left, Qt.Key_Right, Qt.Key_Space):
+            e.accept()
+            return True
+        return super().event(e)
 
     def keyPressEvent(self, e) -> None:
         step = 1.0 if e.modifiers() & Qt.ShiftModifier else 0.1

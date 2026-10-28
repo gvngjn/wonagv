@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QColor, QIcon, QPainter, QPen
+from PySide6.QtGui import QColor, QIcon, QKeySequence, QPainter, QPen, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFontComboBox,
     QFormLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QListWidgetItem,
@@ -76,6 +76,12 @@ def make_clip(path: str) -> Clip:
 
 # ------------------------------------------------------------------ 클립
 
+def delete_key(widget: QWidget, fn) -> None:
+    """목록에서 Delete(맥: Backspace) 키로 선택한 항목 지우기. 칸을 고치는 중에는 그대로 글자 지우기."""
+    for key in (QKeySequence.Delete, QKeySequence(Qt.Key_Backspace)):
+        QShortcut(key, widget, fn, context=Qt.WidgetShortcut)
+
+
 class ClipsPanel(QWidget):
     changed = Signal()
     preview_requested = Signal(str, float)   # 경로, 시작 위치
@@ -94,6 +100,7 @@ class ClipsPanel(QWidget):
         self.list.setDragDropMode(QAbstractItemView.InternalMove)
         self.list.setSelectionMode(QAbstractItemView.SingleSelection)
         self.list.model().rowsMoved.connect(self._sync_order)
+        delete_key(self.list, self.remove_selected)
         self.list.currentRowChanged.connect(self._on_select)
 
         add = QPushButton("＋ 클립 추가")
@@ -748,6 +755,7 @@ class PipPanel(QWidget):
         self._loading = False
         self.list = QListWidget()
         self.list.currentRowChanged.connect(self._on_select)
+        delete_key(self.list, self.remove_selected)
         add = QPushButton("＋ 작은 화면 추가")
         add.clicked.connect(self.add_dialog)
         remove = QPushButton("삭제")
@@ -946,6 +954,7 @@ class SubtitlePanel(QWidget):
 
         self.table = QTableWidget(0, 3)
         self.table.setHorizontalHeaderLabels(["시작", "끝", "자막 내용"])
+        delete_key(self.table, self.remove_rows)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
@@ -1124,6 +1133,7 @@ class SubtitlePanel(QWidget):
             self.table.removeRow(r)
         self._validate()
         self.changed.emit()
+        self.changed.emit()
 
     def clear_all(self) -> None:
         if self.table.rowCount() and QMessageBox.question(self, "자막", "자막을 모두 지울까요?") == QMessageBox.Yes:
@@ -1204,6 +1214,7 @@ class TitlePanel(QWidget):
 
         self.table = QTableWidget(0, 3)
         self.table.setHorizontalHeaderLabels(["시작", "끝", "제목 (줄을 바꾸려면 \\n)"])
+        delete_key(self.table, self.remove_rows)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
