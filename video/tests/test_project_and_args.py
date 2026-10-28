@@ -283,3 +283,13 @@ def test_gpu_codec_args():
     p = Project()
     args = final_args(p, "list.txt", 5.0, "out.mp4", RenderOptions(320, 180, 30, encoder="h264_nvenc"), None)
     assert args[args.index("-c:v") + 1] == "h264_nvenc"
+
+
+def test_multi_export_file_names():
+    import pytest
+    pytest.importorskip("PySide6")
+    from reelcut.gui.main_window import multi_output_path
+
+    assert multi_output_path("/v/완성.mp4", "9:16").replace("\\", "/") == "/v/완성_릴스.mp4"
+    assert multi_output_path("/v/완성", "16:9").replace("\\", "/") == "/v/완성_유튜브.mp4"
+    assert multi_output_path("/v/a.b.MP4", "4:5").replace("\\", "/") == "/v/a.b_인스타피드.mp4"

@@ -11,7 +11,7 @@ from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
-    QButtonGroup, QCheckBox, QComboBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QMainWindow,
+    QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QMainWindow,
     QMessageBox, QProgressBar, QPushButton, QScrollArea, QSlider, QSplitter, QStyle, QTabWidget,
     QVBoxLayout, QWidget,
 )
@@ -69,6 +69,45 @@ def open_external(path: str | None) -> None:
         subprocess.Popen(["open", path])
     else:
         subprocess.Popen(["xdg-open", path])
+
+
+MULTI_SUFFIX = {"16:9": "유튜브", "9:16": "릴스", "1:1": "정사각형", "4:5": "인스타피드"}
+
+
+def multi_output_path(base: str, aspect: str) -> str:
+    """완성영상.mp4 + 9:16 → 완성영상_릴스.mp4"""
+    p = Path(base)
+    stem = p.stem if p.suffix.lower() == ".mp4" else p.name
+    return str(p.with_name(f"{stem}_{MULTI_SUFFIX[aspect]}.mp4"))
+
+
+class MultiExportDialog(QDialog):
+    def __init__(self, parent, size: str) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("여러 비율로 내보내기")
+        lay = QVBoxLayout(self)
+        lay.addWidget(QLabel("같은 영상을 고른 비율마다 하나씩 만들어요.\n"
+                             "비율이 다른 클립은 '비율이 다른 영상' 설정대로 맞춰요."))
+        self.checks = {}
+        for key, (label, _) in ASPECTS.items():
+            c = QCheckBox(label)
+            c.setChecked(key in ("16:9", "9:16"))
+            self.checks[key] = c
+            lay.addWidget(c)
+        self.size = QComboBox()
+        for key, label in SIZES:
+            self.size.addItem(label, key)
+        self.size.setCurrentIndex(max(0, self.size.findData(size)))
+        lay.addWidget(row_widget(QLabel("해상도"), self.size))
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.button(QDialogButtonBox.Ok).setText("내보내기")
+        buttons.button(QDialogButtonBox.Cancel).setText("취소")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        lay.addWidget(buttons)
+
+    def selected(self) -> tuple[list[str], str]:
+        return [k for k, c in self.checks.items() if c.isChecked()], self.size.currentData()
 
 
 class Preview(QWidget):
@@ -279,6 +318,7 @@ class MainWindow(QMainWindow):
             (None, None, None),
             ("미리보기 만들기", ["F5", "Ctrl+R"], lambda: self.render(preview=True)),
             ("영상 내보내기…", ["Ctrl+E"], lambda: self.render(preview=False)),
+            ("여러 비율로 한 번에 내보내기…", ["Ctrl+Shift+E"], self.export_multi),
         ):
             if text is None:
                 v.addSeparator()
@@ -357,6 +397,9 @@ class MainWindow(QMainWindow):
         self.export_btn.setStyleSheet("font-weight: bold; padding: 6px 14px")
         self.export_btn.setToolTip("원래 화질로 영상 파일을 만들어요 (Ctrl+E)")
         self.export_btn.clicked.connect(lambda: self.render(preview=False))
+        self.multi_btn = QPushButton("📐 여러 비율로…")
+        self.multi_btn.setToolTip("유튜브 가로·릴스 세로 등 여러 비율을 한 번에 내보내요 (Ctrl+Shift+E)")
+        self.multi_btn.clicked.connect(self.export_multi)
         self.cancel_btn = QPushButton("취소")
         self.cancel_btn.setEnabled(False)
         self.cancel_btn.clicked.connect(self.cancel_task)
@@ -383,6 +426,7 @@ class MainWindow(QMainWindow):
         bl.setContentsMargins(0, 0, 0, 0)
         bl.addWidget(self.preview_btn)
         bl.addWidget(self.export_btn)
+        bl.addWidget(self.multi_btn)
         bl.addStretch(1)
         bl.addWidget(self.cancel_btn)
         f.addRow(buttons)
@@ -473,7 +517,7 @@ class MainWindow(QMainWindow):
         self._update_title()
 
     def _busy(self, busy: bool) -> None:
-        for w in (self.preview_btn, self.export_btn, self.music.analyze_btn, self.subs.gen_btn):
+        for w in (self.preview_btn, self.export_btn, self.multi_btn, self.music.analyze_btn, self.subs.gen_btn):
             w.setEnabled(not busy)
         self.music.set_downloading(busy)
         if not busy:
@@ -612,19 +656,22 @@ class MainWindow(QMainWindow):
 
         self._start(work, done, "자동 자막 준비 중…")
 
-    def render(self, preview: bool) -> None:
-        from ..render import Renderer
-
+    def _can_render(self) -> bool:
         if not self.preview_btn.isEnabled():  # 다른 작업 중 (단축키로 눌렀을 때)
-            return
+            return False
         if not self.project.clips:
             QMessageBox.information(self, "ReelCut", "클립을 먼저 추가해 주세요.")
-            return
+            return False
         if not self.offer_relink():
-            return
+            return False
         bs = self.project.beat_sync
         if bs.enabled and bs.cut_unit == "beats" and not self.project.music.beats:
             QMessageBox.information(self, "ReelCut", "비트 맞춤을 쓰려면 음악 탭에서 '비트 분석'을 먼저 해 주세요.")
+            return False
+        return True
+
+    def render(self, preview: bool) -> None:
+        if not self._can_render():
             return
         self.music.stop_preview()
         if preview:
@@ -638,40 +685,75 @@ class MainWindow(QMainWindow):
             if not out.lower().endswith(".mp4"):
                 out += ".mp4"
             self.project.export.output = out
+        # 작업 중 편집해도 안전하게 복사
+        self._run_renders([(Project.from_dict(self.project.to_dict()), out)], preview)
+
+    def export_multi(self) -> None:
+        """같은 영상을 여러 화면 비율로 한 번에 (예: 유튜브 가로 + 릴스 세로)."""
+        if not self._can_render():
+            return
+        dlg = MultiExportDialog(self, self.size.currentData() or "1080p")
+        if not dlg.exec():
+            return
+        aspects, size = dlg.selected()
+        if not aspects:
+            return
+        default = self.project.export.output or str(Path.home() / "Videos" / "완성영상.mp4")
+        base, _ = QFileDialog.getSaveFileName(self, "여러 비율로 내보내기 (이름 뒤에 비율이 붙어요)",
+                                              default, "MP4 영상 (*.mp4)")
+        if not base:
+            return
+        jobs = []
+        for key in aspects:
+            project = Project.from_dict(self.project.to_dict())
+            project.export.width, project.export.height = ASPECTS[key][1][size]
+            jobs.append((project, multi_output_path(base, key)))
+        self.music.stop_preview()
+        self._run_renders(jobs, preview=False)
+
+    def _run_renders(self, jobs: list[tuple[Project, str]], preview: bool) -> None:
+        from ..render import Renderer
+
         renderer = Renderer()
-        project = Project.from_dict(self.project.to_dict())   # 작업 중 편집해도 안전하게 복사
+        problems: list[str] = []
 
         def work(t: TaskThread):
             t.cancel_hook = renderer.cancel
-            renderer.render(project, out, preview=preview, on_progress=t.report)
-            return out
+            n = len(jobs)
+            for k, (project, out) in enumerate(jobs):
+                name = f"[{k + 1}/{n}] {Path(out).name} · " if n > 1 else ""
+                renderer.render(project, out, preview=preview,
+                                on_progress=lambda f, m: t.report((k + f) / n, name + m))
+                problems.extend(f"{Path(out).name}: {p}" if n > 1 else p for p in renderer.problems)
+            return [out for _, out in jobs]
 
-        def done(path: str) -> None:
+        def done(paths: list[str]) -> None:
             self.progress.setValue(1000)
-            if renderer.problems:
+            if problems:
                 QMessageBox.warning(self, "결과 확인", "만들어진 영상에서 이상한 점을 찾았어요:\n\n"
-                                    + "\n".join(f"· {p}" for p in renderer.problems)
+                                    + "\n".join(f"· {p}" for p in problems)
                                     + "\n\n같은 설정으로 다시 만들어도 그러면 알려 주세요.")
             if preview:
                 self.status.setText("미리보기 완성! 위에서 재생 중이에요.")
-                self.preview.load(path, autoplay=True, title="미리보기 (저화질)")
-            else:
-                from .. import hwenc
+                self.preview.load(paths[0], autoplay=True, title="미리보기 (저화질)")
+                return
+            from .. import hwenc
 
-                enc = renderer.encoder_used
-                how = f" ({hwenc.NAMES.get(enc, enc)} 그래픽카드 사용)" if enc != hwenc.SOFTWARE else ""
-                self.status.setText(f"내보내기 완료{how}: {path}")
-                box = QMessageBox(self)
-                box.setWindowTitle("ReelCut")
-                box.setText(f"영상을 만들었어요!\n{path}")
-                play_btn = box.addButton("재생", QMessageBox.ActionRole)
-                open_btn = box.addButton("폴더 열기", QMessageBox.ActionRole)
-                box.addButton("확인", QMessageBox.AcceptRole)
-                box.exec()
-                if box.clickedButton() is open_btn:
-                    self._reveal(path)
-                elif box.clickedButton() is play_btn:
-                    open_external(path)
+            enc = renderer.encoder_used
+            how = f" ({hwenc.NAMES.get(enc, enc)} 그래픽카드 사용)" if enc != hwenc.SOFTWARE else ""
+            self.status.setText(f"내보내기 완료{how}: " + ", ".join(Path(p).name for p in paths))
+            box = QMessageBox(self)
+            box.setWindowTitle("ReelCut")
+            box.setText(("영상을 만들었어요!\n" if len(paths) == 1 else f"영상 {len(paths)}개를 만들었어요!\n")
+                        + "\n".join(paths))
+            play_btn = box.addButton("재생", QMessageBox.ActionRole)
+            open_btn = box.addButton("폴더 열기", QMessageBox.ActionRole)
+            box.addButton("확인", QMessageBox.AcceptRole)
+            box.exec()
+            if box.clickedButton() is open_btn:
+                self._reveal(paths[0])
+            elif box.clickedButton() is play_btn:
+                open_external(paths[0])
 
         self._start(work, done, "미리보기 만드는 중…" if preview else "영상 만드는 중…")
 
