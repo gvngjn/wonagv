@@ -7,7 +7,8 @@ from pathlib import Path
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QKeySequence, QPainter, QPen, QShortcut
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFontComboBox,
+    QAbstractItemView, QApplication, QCheckBox, QComboBox, QDateTimeEdit, QDoubleSpinBox, QFileDialog,
+    QFontComboBox,
     QFormLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QListWidgetItem,
     QMessageBox, QProgressDialog, QPushButton, QSizePolicy, QSlider, QSpinBox, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QWidget,
@@ -16,7 +17,7 @@ from PySide6.QtWidgets import (
 from .. import subtitles as subs
 from ..ffmpeg import probe
 from ..project import Clip, PipOverlay, Project, SubtitleEntry
-from ..photos import readable_image, shot_time
+from ..photos import readable_image, shot_time_info
 from ..render import is_image
 from .music_gauge import MusicGauge, MusicPreviewPlayer
 from .thumbnails import THUMB_H, THUMB_W, ThumbnailLoader
@@ -85,13 +86,15 @@ def media_in_folder(folder: str) -> list[str]:
 def make_clip(path: str) -> Clip:
     if is_image(path):
         readable_image(path)        # HEIC는 여기서 미리 바꿔 두고, 못 읽으면 바로 알린다
+        t, src = shot_time_info(path)
         return Clip(path, duration=0.0, in_point=0.0, out_point=IMAGE_DEFAULT_SECONDS, has_audio=False,
-                    shot_at=shot_time(path))
+                    shot_at=t, shot_source=src)
     info = probe(path)
     if not info.has_video:
         raise ValueError(f"영상이 없는 파일이에요: {Path(path).name}")
+    t, src = shot_time_info(path, info.created)
     return Clip(path, info.duration, 0.0, 0.0, info.has_audio, info.width, info.height,
-                shot_at=shot_time(path, info.created))
+                shot_at=t, shot_source=src)
 
 
 # ------------------------------------------------------------------ 클립
@@ -182,12 +185,19 @@ class ClipsPanel(QWidget):
         self.clip_vol.valueChanged.connect(self._on_clip_props)
         self.clip_mute = QCheckBox("음소거")
         self.clip_mute.toggled.connect(self._on_clip_props)
+        self.shot_edit = QDateTimeEdit()
+        self.shot_edit.setDisplayFormat("yyyy-MM-dd HH:mm")
+        self.shot_edit.setCalendarPopup(True)
+        self.shot_edit.dateTimeChanged.connect(self._on_shot_time)
+        self.shot_note = QLabel()
+        self.shot_note.setStyleSheet("color: #c0392b")
         form = QFormLayout(self.edit_box)
         form.addRow("시작", row(self.in_spin, set_in))
         form.addRow("끝", row(self.out_spin, set_out))
         form.addRow("속도", self.speed)
         form.addRow("사진 움직임", self.motion)
         form.addRow("이 클립 소리", row(self.clip_vol, clip_vol_lbl, self.clip_mute))
+        form.addRow("찍은 시각", row(self.shot_edit, self.shot_note, None))
         form.addRow(row(self.clip_info, None, reset))
         self.edit_box.setEnabled(False)
 
@@ -231,7 +241,8 @@ class ClipsPanel(QWidget):
             extra += "  🔇"
         if c.shot_at:
             import time
-            extra += "  " + time.strftime("%m/%d %H:%M", time.localtime(c.shot_at))
+            unsure = "⚠" if c.shot_source == "file" else ""
+            extra += f"  {unsure}" + time.strftime("%y/%m/%d %H:%M", time.localtime(c.shot_at))
         item.setText(f"{kind} {c.name}   {fmt_time(c.timeline_length)}{trimmed}{extra}")
         at = self._thumb_time(c)
         item.setData(Qt.UserRole + 1, ThumbnailLoader.key(c.path, at))
@@ -273,6 +284,11 @@ class ClipsPanel(QWidget):
                 errors.append(str(e))
         if progress:
             progress.close()
+        unknown = [c for c in new if c.shot_source == "file"]
+        if unknown:
+            from .shot_time_dialog import ShotTimeDialog
+
+            ShotTimeDialog(unknown, self.thumbs, self).exec()
         if sort_new:
             new.sort(key=lambda c: c.shot_at)
         self.project.clips.extend(new)
@@ -361,10 +377,29 @@ class ClipsPanel(QWidget):
         self.clip_mute.setEnabled(c.has_audio and not image)
         self.clip_vol.setValue(int(round((c.volume if c.volume > 0 else 1.0) * 100)))
         self.clip_mute.setChecked(c.volume <= 0)
+        self._show_shot_time(c)
         self._loading = False
         self._update_info(c)
         if not is_image(c.path):
             self.preview_requested.emit(c.path, c.in_point)
+
+    def _show_shot_time(self, c: Clip) -> None:
+        from PySide6.QtCore import QDateTime
+
+        self.shot_edit.setDateTime(QDateTime.fromSecsSinceEpoch(int(c.shot_at or 0)))
+        self.shot_note.setText("⚠ 날짜 정보가 없어 파일 시각으로 추정" if c.shot_source == "file" else "")
+
+    def _on_shot_time(self, dt) -> None:
+        if self._loading:
+            return
+        c = self.current_clip()
+        if not c:
+            return
+        c.shot_at = float(dt.toSecsSinceEpoch())
+        c.shot_source = "manual"
+        self.shot_note.setText("")
+        self._label(self.list.currentItem())
+        self.changed.emit()
 
     def _update_info(self, c: Clip) -> None:
         if is_image(c.path):

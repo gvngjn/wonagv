@@ -367,6 +367,9 @@ def test_folder_scan_and_photo_date(tmp_path):
     assert found == ["b.MP4", "photo.jpg", "day2/a.mov"]
     assert shot_time(str(tmp_path / "photo.jpg")) == parse_time("2025-03-14T20:30:00+09:00")
     assert shot_time(str(tmp_path / "b.MP4")) > 0                     # 날짜 정보가 없으면 파일 시각
+    from reelcut.photos import shot_time_info
+    assert shot_time_info(str(tmp_path / "b.MP4"))[1] == "file"         # → 사용자에게 물어볼 대상
+    assert shot_time_info(str(tmp_path / "photo.jpg"))[1] == "meta"
     assert shot_time(str(tmp_path / "b.MP4"), created=123456789.0) == 123456789.0
 
 

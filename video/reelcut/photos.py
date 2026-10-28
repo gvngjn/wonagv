@@ -80,14 +80,19 @@ def photo_taken_time(path: str) -> float:
     return time.mktime(st)      # 시간대가 없으면 이 컴퓨터 시간대로
 
 
-def shot_time(path: str, created: float = 0.0) -> float:
-    """찍은 시각: 영상 메타데이터 → 사진 EXIF → 파일 수정 시각 순으로."""
+def shot_time_info(path: str, created: float = 0.0) -> tuple[float, str]:
+    """(찍은 시각, 출처). 출처: meta(영상·사진에 기록된 시각) | file(파일 수정 시각 — 정확하지 않을 수 있음)."""
     from .render import is_image
 
     t = created or (photo_taken_time(path) if is_image(path) else 0.0)
-    if not t:
-        try:
-            t = os.path.getmtime(path)
-        except OSError:
-            t = 0.0
-    return t
+    if t:
+        return t, "meta"
+    try:
+        return os.path.getmtime(path), "file"
+    except OSError:
+        return 0.0, "file"
+
+
+def shot_time(path: str, created: float = 0.0) -> float:
+    """찍은 시각: 영상 메타데이터 → 사진 EXIF → 파일 수정 시각 순으로."""
+    return shot_time_info(path, created)[0]
