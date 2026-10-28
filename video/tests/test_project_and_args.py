@@ -137,11 +137,15 @@ def test_friendly_ffmpeg_messages():
 
 
 def test_loudness_filter_in_final_args():
-    p = Project()
+    p = Project(clips=[Clip("a.mp4", 5)])
     args = final_args(p, "list.txt", 5.0, "o.mp4", RenderOptions(640, 360, 30), None)
     assert "loudnorm=I=-14" in args[args.index("-filter_complex") + 1]
     p.export.loudness = 0
     args = final_args(p, "list.txt", 5.0, "o.mp4", RenderOptions(640, 360, 30), None)
+    assert "loudnorm" not in args[args.index("-filter_complex") + 1]
+    # 소리가 전혀 없으면(무음 영상·사진만, 음악 없음) 음량 맞춤을 건너뛴다 (무음에 걸면 NaN으로 실패)
+    silent = Project(clips=[Clip("a.mp4", 5, has_audio=False), Clip("p.jpg", 0, 0, 3, False)])
+    args = final_args(silent, "list.txt", 5.0, "o.mp4", RenderOptions(640, 360, 30), None)
     assert "loudnorm" not in args[args.index("-filter_complex") + 1]
 
 
@@ -314,3 +318,14 @@ def test_animated_subtitles_ass():
     assert line.startswith("Dialogue: 0,0:00:01.00,0:00:02.50,Default,,0,0,0,,{\\fad(60,120)\\fscx70")
     assert line.endswith("첫 줄\\N\\{둘째\\}")
     assert "\\fad(150,150)" in animated_subs_ass([SubtitleEntry(0, 1, "a")], "fade")
+
+
+def test_tonemap_only_for_hdr(monkeypatch):
+    import reelcut.render as render
+
+    monkeypatch.setattr(render, "hdr_transfer", lambda path: "arib-std-b67" if "iphone" in path else "")
+    hdr = segment_args(Segment("iphone.mov", 0, 1.0), "o.mkv", RenderOptions(320, 180, 30))
+    graph = hdr[hdr.index("-filter_complex") + 1]
+    assert graph.startswith("[0:v]zscale=tin=arib-std-b67") and "tonemap=tonemap=mobius" in graph
+    sdr = segment_args(Segment("android.mp4", 0, 1.0), "o.mkv", RenderOptions(320, 180, 30))
+    assert "tonemap" not in sdr[sdr.index("-filter_complex") + 1]

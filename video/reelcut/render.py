@@ -18,7 +18,7 @@ from typing import Callable
 
 from . import cache
 from . import hwenc, logs
-from .ffmpeg import Cancelled, FFmpegError, ProcessRunner
+from .ffmpeg import Cancelled, FFmpegError, ProcessRunner, hdr_transfer
 from .project import PipOverlay, Project, Segment, SubtitleSettings, TitleSettings
 from .subtitles import save_srt
 from .timeline import beat_sync_active, build_segments, segment_starts
@@ -44,6 +44,19 @@ class RenderOptions:
     preset: str = "medium"
     fit: str = "pad"
     encoder: str = "libx264"       # 최종 영상 인코더 (조각은 항상 libx264)
+
+
+def tonemap_filter(transfer: str) -> str:
+    """HDR(아이폰 기본 촬영 등) → 일반 화면 색으로 (뒤에 쉼표 포함, HDR이 아니면 빈 문자열).
+
+    그냥 줄이면 색이 회색으로 바래 보인다. mobius는 중간 밝기는 거의 그대로 두고
+    아주 밝은 부분(하늘·조명)만 부드럽게 눌러 준다.
+    """
+    if not transfer:
+        return ""
+    return (f"zscale=tin={transfer}:pin=bt2020:min=bt2020nc:t=linear:npl=100,format=gbrpf32le,"
+            "zscale=p=bt709,tonemap=tonemap=mobius:param=0.5:desat=0,"
+            "zscale=t=bt709:m=bt709:r=tv,format=yuv420p,")
 
 
 def fit_graph(src: str, out: str, w: int, h: int, fit: str) -> str:
@@ -147,14 +160,14 @@ def volume_filter(volume: float) -> str:
 
 def normalize_video_graph(w: int, h: int, fps: float, frames: int, duration: float,
                           fit: str = "pad", transition: str = "none", speed: float = 1.0,
-                          motion: str = "none") -> str:
+                          motion: str = "none", hdr: str = "") -> str:
     """[0:v] → [v] : 화면 맞추기 + (속도·사진 움직임) + 프레임레이트 + 정확한 프레임 수 (+ 컷 전환 효과)."""
     speed_f = "" if abs(speed - 1.0) < 1e-6 else f"setpts=(PTS-STARTPTS)/{_num(speed)},"
     motion_f = motion_filter(motion, w, h, fps, frames, duration)
     if motion_f:
         speed_f = motion_f[1:] + ","
     return (
-        fit_graph("[0:v]", "[fit]", w, h, fit) + ";"
+        fit_graph("[0:v]" + tonemap_filter(hdr), "[fit]", w, h, fit) + ";"
         f"[fit]{speed_f}fps={_num(fps)},format=yuv420p,"
         # 원본이 모자라면 마지막 장면을 늘려서라도 정확한 길이로 맞춘다
         f"tpad=stop_mode=clone:stop_duration={_num(duration + 1)},"
@@ -172,6 +185,7 @@ def segment_args(seg: Segment, out_path: str, opt: RenderOptions, transition: st
     args: list[str] = []
     speed = 1.0
     motion = "none"
+    hdr = ""
     if is_image(seg.path):
         motion = resolve_motion(seg.motion, index)
         args += ["-loop", "1", "-framerate", _num(opt.fps), "-t", _num(dur + 0.5), "-i", seg.path]
@@ -182,11 +196,12 @@ def segment_args(seg: Segment, out_path: str, opt: RenderOptions, transition: st
             args += ["-ss", _num(seg.src_start)]
         args += ["-t", _num(dur * speed + 0.5), "-i", seg.path]
         has_audio = seg.has_audio and seg.volume > 0
+        hdr = hdr_transfer(seg.path)
     if not has_audio:
         args += ["-f", "lavfi", "-i", f"anullsrc=r={AUDIO_SR}:cl=stereo"]
     a_in = "[0:a]" if has_audio else "[1:a]"
     graph = (
-        f"{normalize_video_graph(opt.width, opt.height, opt.fps, frames, dur, opt.fit, transition, speed, motion)};"
+        f"{normalize_video_graph(opt.width, opt.height, opt.fps, frames, dur, opt.fit, transition, speed, motion, hdr)};"
         f"{a_in}{atempo_chain(speed) if has_audio else ''}"
         f"{volume_filter(seg.volume) if has_audio else ''}"
         f"aresample={AUDIO_SR},aformat=sample_fmts=s16:channel_layouts=stereo,"
@@ -489,7 +504,8 @@ def final_args(project: Project, concat_list: str, total: float, out_path: str,
             args += ["-t", _num(span), "-i", p.path]
             has_audio = p.has_audio
         pw, x, y = pip_geometry(p, opt.width, opt.height)
-        chain = f"[{idx}:v]scale={pw}:-2,setsar=1"
+        hdr = "" if is_image(p.path) else hdr_transfer(p.path)
+        chain = f"[{idx}:v]{tonemap_filter(hdr)}scale={pw}:-2,setsar=1"
         if p.border > 0:
             b = int(p.border)
             chain += f",pad=iw+{2 * b}:ih+{2 * b}:{b}:{b}:color={p.border_color}"
@@ -550,12 +566,17 @@ def final_args(project: Project, concat_list: str, total: float, out_path: str,
     vf.append(f"{base}{fade_filters(project.export.fade_in, project.export.fade_out, total, 'v')}"
               f"trim=duration={_num(total)},setpts=PTS-STARTPTS,format=yuv420p[vout]")
 
+    # 소리가 하나도 없으면(무음 클립·사진만, 음악 없음) 음량 맞춤을 건너뛴다.
+    # 완전한 무음에 loudnorm을 걸면 NaN이 나와서 내보내기가 실패한다
+    clip_sound = project.export.clip_volume > 0 and any(
+        c.has_audio and c.volume > 0 and not is_image(c.path) for c in project.clips)
+    has_sound = clip_sound or len(mix) > 1 or bool(music.path)
     if len(mix) > 1:
         af.append(f"{''.join(mix)}amix=inputs={len(mix)}:duration=first:normalize=0[amixed]")
     else:
         af.append("[a0]anull[amixed]")
     af.append(f"[amixed]{fade_filters(project.export.fade_in, project.export.fade_out, total, 'a')}"
-              f"{loudness_filter(project.export.loudness)},"
+              f"{loudness_filter(project.export.loudness) if has_sound else 'anull'},"
               # 길이를 필터에서 정확히 맞춘다 (출력 -t는 인코더 지연에 따라 소리 끝이 잘리는 경우가 있었음)
               f"apad=whole_dur={_num(total)},atrim=duration={_num(total)},asetpts=PTS-STARTPTS[aout]")
 
@@ -597,7 +618,9 @@ def still_args(path: str, at: float, out_path: str, project: Project) -> list[st
     args = []
     if at > 0 and not is_image(path):
         args += ["-ss", _num(at)]
-    graph = fit_graph("[0:v]", "[fit]", w, h, ex.fit) + f";[fit]{color_filter(ex.color)}format=rgb24[v]"
+    hdr = "" if is_image(path) else hdr_transfer(path)
+    graph = (fit_graph("[0:v]" + tonemap_filter(hdr), "[fit]", w, h, ex.fit)
+             + f";[fit]{color_filter(ex.color)}format=rgb24[v]")
     args += ["-i", path, "-filter_complex", graph, "-map", "[v]", "-frames:v", "1"]
     if out_path.lower().endswith((".jpg", ".jpeg")):
         args += ["-q:v", "2"]

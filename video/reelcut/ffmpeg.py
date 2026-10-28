@@ -1,6 +1,7 @@
 """FFmpeg / FFprobe 찾기, 미디어 정보 조회, 진행률을 읽으며 실행하기."""
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import os
@@ -154,6 +155,30 @@ def probe(path: str) -> MediaInfo:
     except subprocess.CalledProcessError as e:
         raise FFmpegError(f"파일을 읽을 수 없어요: {path}\n{e.stderr.decode('utf-8', 'replace')}") from e
     return parse_probe_json(str(path), json.loads(out.stdout.decode("utf-8", "replace")))
+
+
+HDR_TRANSFERS = ("arib-std-b67", "smpte2084")   # HLG(아이폰·갤럭시 HDR), PQ(HDR10)
+
+
+@functools.lru_cache(maxsize=512)
+def _hdr_transfer_cached(path: str, mtime: float) -> str:
+    cmd = [ffprobe_path(), "-v", "error", "-select_streams", "v:0", "-show_entries",
+           "stream=color_transfer", "-of", "default=nw=1:nk=1", path]
+    try:
+        out = subprocess.run(cmd, capture_output=True, timeout=20, creationflags=_NO_WINDOW).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    trc = out.decode("utf-8", "replace").strip()
+    return trc if trc in HDR_TRANSFERS else ""
+
+
+def hdr_transfer(path: str) -> str:
+    """HDR 영상이면 전달 특성 이름(arib-std-b67 / smpte2084), 아니면 ""."""
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        return ""
+    return _hdr_transfer_cached(str(path), mtime)
 
 
 def decode_audio(path: str, sample_rate: int, start: float = 0.0,

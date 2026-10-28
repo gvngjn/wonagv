@@ -358,3 +358,29 @@ def test_animated_subtitles_render(media, tmp_path):
     out = tmp_path / "pop.mp4"
     Renderer().render(p, str(out), preview=True)
     assert probe(str(out)).duration == pytest.approx(7.0, abs=0.1)
+
+
+@needs_ffmpeg
+def test_hdr_phone_video_keeps_colors(tmp_path):
+    """아이폰 HDR(HLG) 영상이 회색으로 바래지 않게 일반 색으로 바꾼다."""
+    import numpy as np
+
+    from reelcut.ffmpeg import hdr_transfer
+
+    src = tmp_path / "hlg.mov"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=320x568:r=30:d=1",
+                    "-vf", "format=yuv420p,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv,"
+                    "zscale=t=linear:npl=203,format=gbrpf32le,zscale=p=bt2020,zscale=t=arib-std-b67:m=bt2020nc:r=tv,"
+                    "format=yuv420p", "-c:v", "libx264", "-preset", "ultrafast", "-color_primaries", "bt2020",
+                    "-color_trc", "arib-std-b67", "-colorspace", "bt2020nc", str(src)], check=True)
+    assert hdr_transfer(str(src)) == "arib-std-b67"
+    m = probe(str(src))
+    p = Project(clips=[Clip(m.path, m.duration, has_audio=False, width=m.width, height=m.height)])
+    p.export.width, p.export.height, p.export.fps, p.export.preset = 320, 568, 30, "ultrafast"
+    out = tmp_path / "out.mp4"
+    Renderer(use_cache=False).render(p, str(out))
+    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", str(out), "-frames:v", "1", "-f", "rawvideo",
+                          "-pix_fmt", "rgb24", "-"], capture_output=True).stdout
+    rgb = np.frombuffer(raw, np.uint8).reshape(-1, 3).astype(int)
+    saturation = (rgb.max(1) - rgb.min(1)).mean()
+    assert saturation > 170        # 바랜 채로 나오면 약 90
