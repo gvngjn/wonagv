@@ -125,9 +125,19 @@ class ClipsPanel(QWidget):
         reset.clicked.connect(self._reset_trim)
         self.clip_info = QLabel()
         self.clip_info.setWordWrap(True)
+        self.speed = QComboBox()
+        for sp in (0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0):
+            self.speed.addItem(("보통 (1배)" if sp == 1 else f"{sp:g}배" + (" 느리게" if sp < 1 else " 빠르게")), sp)
+        self.speed.currentIndexChanged.connect(self._on_clip_props)
+        self.clip_vol, clip_vol_lbl = percent_slider(200)
+        self.clip_vol.valueChanged.connect(self._on_clip_props)
+        self.clip_mute = QCheckBox("음소거")
+        self.clip_mute.toggled.connect(self._on_clip_props)
         form = QFormLayout(self.edit_box)
         form.addRow("시작", row(self.in_spin, set_in))
         form.addRow("끝", row(self.out_spin, set_out))
+        form.addRow("속도", self.speed)
+        form.addRow("이 클립 소리", row(self.clip_vol, clip_vol_lbl, self.clip_mute))
         form.addRow(row(self.clip_info, None, reset))
         self.edit_box.setEnabled(False)
 
@@ -164,7 +174,12 @@ class ClipsPanel(QWidget):
         c: Clip = item.data(Qt.UserRole)
         kind = "🖼" if is_image(c.path) else ("🎬" if c.has_audio else "🎬🔇")
         trimmed = " ✂" if (c.in_point > 0 or (c.out_point > 0 and c.duration and c.out_point < c.duration)) else ""
-        item.setText(f"{kind} {c.name}   {fmt_time(c.length)}{trimmed}")
+        extra = ""
+        if c.speed != 1 and not is_image(c.path):
+            extra += f"  ⏩{c.speed:g}배" if c.speed > 1 else f"  🐢{c.speed:g}배"
+        if c.has_audio and c.volume <= 0:
+            extra += "  🔇"
+        item.setText(f"{kind} {c.name}   {fmt_time(c.timeline_length)}{trimmed}{extra}")
         at = self._thumb_time(c)
         item.setData(Qt.UserRole + 1, ThumbnailLoader.key(c.path, at))
         pm = self.thumbs.get(c.path, at)
@@ -224,7 +239,7 @@ class ClipsPanel(QWidget):
         self.changed.emit()
 
     def _update_total(self) -> None:
-        total = sum(c.length for c in self.project.clips)
+        total = sum(c.timeline_length for c in self.project.clips)
         self.total_label.setText(f"클립 {len(self.project.clips)}개 · 이어붙인 길이 {fmt_time(total)}")
 
     # --- 자르기 ---
@@ -244,6 +259,17 @@ class ClipsPanel(QWidget):
         self.out_spin.setMaximum(limit)
         self.in_spin.setValue(c.in_point)
         self.out_spin.setValue(c.end)
+        image = is_image(c.path)
+        self.speed.setEnabled(not image)
+        idx = self.speed.findData(float(c.speed))
+        if idx < 0:
+            self.speed.addItem(f"{c.speed:g}배", float(c.speed))
+            idx = self.speed.count() - 1
+        self.speed.setCurrentIndex(idx)
+        self.clip_vol.setEnabled(c.has_audio and not image)
+        self.clip_mute.setEnabled(c.has_audio and not image)
+        self.clip_vol.setValue(int(round((c.volume if c.volume > 0 else 1.0) * 100)))
+        self.clip_mute.setChecked(c.volume <= 0)
         self._loading = False
         self._update_info(c)
         if not is_image(c.path):
@@ -254,7 +280,22 @@ class ClipsPanel(QWidget):
             self.clip_info.setText(f"사진 · {fmt_time(c.length)} 동안 표시")
         else:
             size = f"{c.width}×{c.height} · " if c.width else ""
-            self.clip_info.setText(f"{size}원본 {fmt_time(c.duration)} → 사용 {fmt_time(c.length)}")
+            speed = f" → 영상에서 {fmt_time(c.timeline_length)}" if c.speed != 1 else ""
+            self.clip_info.setText(f"{size}원본 {fmt_time(c.duration)} → 사용 {fmt_time(c.length)}{speed}")
+
+    def _on_clip_props(self) -> None:
+        if self._loading:
+            return
+        c = self.current_clip()
+        if not c:
+            return
+        c.speed = float(self.speed.currentData())
+        c.volume = 0.0 if self.clip_mute.isChecked() else self.clip_vol.value() / 100
+        self.clip_vol.setEnabled(c.has_audio and not self.clip_mute.isChecked())
+        self._label(self.list.currentItem())
+        self._update_info(c)
+        self._update_total()
+        self.changed.emit()
 
     def _on_trim(self) -> None:
         if self._loading:

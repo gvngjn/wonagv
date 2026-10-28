@@ -17,6 +17,8 @@ class Clip:
     has_audio: bool = True
     width: int = 0
     height: int = 0
+    volume: float = 1.0            # 이 클립 원본 소리 크기 (0 = 음소거)
+    speed: float = 1.0             # 재생 속도 (0.5 = 느리게, 2 = 빠르게)
 
     @property
     def end(self) -> float:
@@ -29,6 +31,11 @@ class Clip:
         return max(0.0, self.end - self.in_point)
 
     @property
+    def timeline_length(self) -> float:
+        """완성 영상에서 차지하는 길이 (속도 반영)."""
+        return self.length / (self.speed if self.speed > 0 else 1.0)
+
+    @property
     def name(self) -> str:
         return Path(self.path).name
 
@@ -38,8 +45,10 @@ class Segment:
     """실제로 렌더링할 조각 (원본 파일, 원본 시작점, 길이)."""
     path: str
     src_start: float
-    duration: float
+    duration: float                # 완성 영상에서의 길이
     has_audio: bool = True
+    speed: float = 1.0             # 원본에서는 duration * speed 만큼 사용
+    volume: float = 1.0
 
 
 # 화면 속 화면 위치

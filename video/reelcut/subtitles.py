@@ -97,7 +97,14 @@ def timeline_audio(segments: list[Segment], sample_rate: int = WHISPER_SR):
     parts = []
     for s in segments:
         n = int(round(s.duration * sample_rate))
-        y = decode_audio(s.path, sample_rate, s.src_start, s.duration) if s.has_audio else np.zeros(0, np.float32)
+        speed = s.speed or 1.0
+        if s.has_audio and s.volume > 0:
+            y = decode_audio(s.path, sample_rate, s.src_start, s.duration * speed)
+            if abs(speed - 1.0) > 1e-6 and len(y) > 1:
+                # 속도를 바꾼 클립은 완성 영상 길이에 맞게 늘이거나 줄인다 (자막 시간 맞춤용)
+                y = np.interp(np.linspace(0, len(y) - 1, n), np.arange(len(y)), y).astype(np.float32)
+        else:
+            y = np.zeros(0, np.float32)
         if len(y) < n:
             y = np.pad(y, (0, n - len(y)))
         parts.append(y[:n])

@@ -104,3 +104,19 @@ def test_continuous_keeps_original_flow():
     segs = beat_sync_segments(clips(), [0, 4, 8, 12, 14], "continuous")
     assert [(s.path, s.src_start) for s in segs] == [
         ("a.mp4", 0.0), ("a.mp4", 4.0), ("b.mp4", 1.0), ("c.mp4", 0.0)]
+
+
+def test_speed_changes_timeline_length_and_source_range():
+    fast = Clip("fast.mp4", 20.0, 0.0, 10.0, speed=2.0, volume=0.5)
+    slow = Clip("slow.mp4", 20.0, 2.0, 4.0, speed=0.5)
+    assert fast.timeline_length == 5.0 and slow.timeline_length == 4.0
+    segs = concat_segments([fast, slow])
+    assert [(s.duration, s.speed, s.volume) for s in segs] == [(5.0, 2.0, 0.5), (4.0, 0.5, 1.0)]
+    # 비트 맞춤: 컷 길이는 완성 영상 기준, 원본에서는 속도만큼 더(덜) 사용하고 범위를 넘지 않음
+    bounds = [i * 0.5 for i in range(19)]
+    out = beat_sync_segments([fast, slow], bounds, "sequential")
+    for s in out:
+        c = fast if s.path == "fast.mp4" else slow
+        assert s.speed == c.speed
+        assert c.in_point - 1e-9 <= s.src_start
+        assert s.src_start + s.duration * s.speed <= c.end + 1e-9

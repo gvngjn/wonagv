@@ -196,3 +196,17 @@ def test_final_args_with_titles():
     p = Project()
     args = final_args(p, "list.txt", 5.0, "o.mp4", RenderOptions(640, 360, 30), None, "fonts", "titles.ass")
     assert "subtitles=titles.ass:fontsdir=fonts[vtitle]" in args[args.index("-filter_complex") + 1]
+
+
+def test_speed_and_volume_args():
+    from reelcut.render import atempo_chain
+
+    assert atempo_chain(1.0) == ""
+    assert atempo_chain(4.0) == "atempo=2,atempo=2,"
+    assert atempo_chain(0.25) == "atempo=0.5,atempo=0.5,"
+    args = segment_args(Segment("v.mp4", 3.0, 2.0, True, speed=2.0, volume=0.5), "o.mkv", RenderOptions(320, 180, 30))
+    g = args[args.index("-filter_complex") + 1]
+    assert args[args.index("-t") + 1] == "4.5"                    # 원본 4초 + 여유
+    assert "setpts=(PTS-STARTPTS)/2" in g and "atempo=2," in g and "volume=0.5," in g
+    muted = segment_args(Segment("v.mp4", 0, 1.0, True, volume=0.0), "o.mkv", RenderOptions(320, 180, 30))
+    assert "anullsrc" in " ".join(muted)

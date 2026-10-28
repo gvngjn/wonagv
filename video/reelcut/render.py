@@ -86,12 +86,33 @@ def transition_filter(kind: str, w: int, h: int, fps: float) -> str:
     return ""
 
 
+def atempo_chain(speed: float) -> str:
+    """소리 속도 바꾸기 (음높이 유지). atempo는 한 번에 0.5~2배라서 여러 번 이어 붙인다."""
+    if abs(speed - 1.0) < 1e-6:
+        return ""
+    parts = []
+    s = speed
+    while s > 2.0:
+        parts.append(2.0)
+        s /= 2.0
+    while s < 0.5:
+        parts.append(0.5)
+        s /= 0.5
+    parts.append(s)
+    return "".join(f"atempo={_num(round(p, 6))}," for p in parts)
+
+
+def volume_filter(volume: float) -> str:
+    return "" if abs(volume - 1.0) < 1e-6 else f"volume={_num(volume)},"
+
+
 def normalize_video_graph(w: int, h: int, fps: float, frames: int, duration: float,
-                          fit: str = "pad", transition: str = "none") -> str:
-    """[0:v] → [v] : 화면 맞추기 + 프레임레이트 + 정확한 프레임 수 (+ 컷 전환 효과)."""
+                          fit: str = "pad", transition: str = "none", speed: float = 1.0) -> str:
+    """[0:v] → [v] : 화면 맞추기 + (속도) + 프레임레이트 + 정확한 프레임 수 (+ 컷 전환 효과)."""
+    speed_f = "" if abs(speed - 1.0) < 1e-6 else f"setpts=(PTS-STARTPTS)/{_num(speed)},"
     return (
         fit_graph("[0:v]", "[fit]", w, h, fit) + ";"
-        f"[fit]fps={_num(fps)},format=yuv420p,"
+        f"[fit]{speed_f}fps={_num(fps)},format=yuv420p,"
         # 원본이 모자라면 마지막 장면을 늘려서라도 정확한 길이로 맞춘다
         f"tpad=stop_mode=clone:stop_duration={_num(duration + 1)},"
         f"trim=end_frame={frames},setpts=PTS-STARTPTS"
@@ -105,20 +126,24 @@ def segment_args(seg: Segment, out_path: str, opt: RenderOptions, transition: st
     dur = frames / opt.fps
     samples = int(round(dur * AUDIO_SR))
     args: list[str] = []
+    speed = 1.0
     if is_image(seg.path):
         args += ["-loop", "1", "-framerate", _num(opt.fps), "-t", _num(dur + 0.5), "-i", seg.path]
         has_audio = False
     else:
+        speed = min(4.0, max(0.25, seg.speed or 1.0))
         if seg.src_start > 0:
             args += ["-ss", _num(seg.src_start)]
-        args += ["-t", _num(dur + 0.5), "-i", seg.path]
-        has_audio = seg.has_audio
+        args += ["-t", _num(dur * speed + 0.5), "-i", seg.path]
+        has_audio = seg.has_audio and seg.volume > 0
     if not has_audio:
         args += ["-f", "lavfi", "-i", f"anullsrc=r={AUDIO_SR}:cl=stereo"]
     a_in = "[0:a]" if has_audio else "[1:a]"
     graph = (
-        f"{normalize_video_graph(opt.width, opt.height, opt.fps, frames, dur, opt.fit, transition)};"
-        f"{a_in}aresample={AUDIO_SR},aformat=sample_fmts=s16:channel_layouts=stereo,"
+        f"{normalize_video_graph(opt.width, opt.height, opt.fps, frames, dur, opt.fit, transition, speed)};"
+        f"{a_in}{atempo_chain(speed) if has_audio else ''}"
+        f"{volume_filter(seg.volume) if has_audio else ''}"
+        f"aresample={AUDIO_SR},aformat=sample_fmts=s16:channel_layouts=stereo,"
         f"apad,atrim=end_sample={samples},asetpts=PTS-STARTPTS[a]"
     )
     args += [

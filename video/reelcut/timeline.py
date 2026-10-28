@@ -6,12 +6,14 @@
 from __future__ import annotations
 
 import random
+from dataclasses import replace
 
 from .project import Clip, Project, Segment
 
 
 def concat_segments(clips: list[Clip]) -> list[Segment]:
-    return [Segment(c.path, c.in_point, c.length, c.has_audio) for c in clips if c.length > 0.05]
+    return [Segment(c.path, c.in_point, c.timeline_length, c.has_audio, c.speed, c.volume)
+            for c in clips if c.length > 0.05]
 
 
 def cut_boundaries(beats: list[float], music_start: float, beats_per_cut: int,
@@ -43,6 +45,22 @@ def cut_boundaries(beats: list[float], music_start: float, beats_per_cut: int,
 
 def beat_sync_segments(clips: list[Clip], boundaries: list[float], order: str = "sequential",
                        seed: int = 7) -> list[Segment]:
+    """클립 속도를 반영해서 컷을 고른다.
+
+    속도가 다른 클립도 '완성 영상 기준 길이'로 바꾼 대리 클립으로 계산한 뒤 원본 위치로 되돌린다.
+    """
+    usable = [c for c in clips if c.length > 0.05]
+    proxies = [Clip(f"\0{k}", c.timeline_length, has_audio=c.has_audio) for k, c in enumerate(usable)]
+    out = []
+    for s in _beat_sync_core(proxies, boundaries, order, seed):
+        c = usable[int(s.path[1:])]
+        out.append(Segment(c.path, c.in_point + s.src_start * c.speed, s.duration, c.has_audio,
+                           c.speed, c.volume))
+    return out
+
+
+def _beat_sync_core(clips: list[Clip], boundaries: list[float], order: str = "sequential",
+                    seed: int = 7) -> list[Segment]:
     """컷 길이(boundaries 간격)에 맞게 클립에서 조각을 골라낸다.
 
     sequential: 컷마다 다음 파일로 (1→2→3→1…), 각 파일의 처음~끝을 고르게 사용
@@ -142,7 +160,7 @@ def build_segments(project: Project) -> list[Segment]:
             segs = _limit(segs, bs.max_duration)
         return segs
 
-    total_clips = sum(c.length for c in clips)
+    total_clips = sum(c.timeline_length for c in clips)
     music_left = max(0.0, music.duration - music.start) if music.duration > 0 else total_clips
     if bs.use_music_length:
         end_time = music_left
@@ -162,7 +180,7 @@ def _limit(segs: list[Segment], max_duration: float) -> list[Segment]:
         if t >= max_duration:
             break
         d = min(s.duration, max_duration - t)
-        out.append(Segment(s.path, s.src_start, d, s.has_audio))
+        out.append(replace(s, duration=d))
         t += d
     return out
 
