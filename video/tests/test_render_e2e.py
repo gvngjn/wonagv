@@ -273,3 +273,31 @@ def test_cache_prune(tmp_path, monkeypatch):
     assert sorted(f.name for f in d.glob("*.mkv")) == ["3.mkv", "4.mkv"]
     cache.clear()
     assert cache.size() == 0
+
+
+@needs_ffmpeg
+def test_music_ducks_under_speech(tmp_path):
+    """원본 소리가 나는 동안만 음악(220Hz)이 줄어드는지 실제로 렌더링해서 잰다."""
+    import numpy as np
+
+    ff = lambda *a: subprocess.run(["ffmpeg", "-v", "error", "-y", *a], check=True)
+    talk, music = tmp_path / "talk.mp4", tmp_path / "music.wav"
+    ff("-f", "lavfi", "-i", "color=c=gray:s=160x90:d=6", "-f", "lavfi",
+       "-i", "sine=f=1000:d=6,volume='if(gte(t,3),1.13,0)':eval=frame",
+       "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-shortest", str(talk))
+    ff("-f", "lavfi", "-i", "sine=f=220:d=8", str(music))
+    levels = {}
+    for duck in ("off", "strong"):
+        p = Project(clips=[Clip(str(talk), probe(str(talk)).duration)])
+        p.music = MusicSettings(str(music), 8.0, fade_out=0, duck=duck)
+        p.export.width, p.export.height, p.export.fps, p.export.preset, p.export.loudness = 160, 90, 25, "ultrafast", 0
+        out = tmp_path / f"{duck}.mp4"
+        Renderer().render(p, str(out))
+        raw = subprocess.run(["ffmpeg", "-v", "error", "-i", str(out), "-af", "lowpass=f=400,lowpass=f=400",
+                              "-ac", "1", "-ar", "8000", "-f", "s16le", "-"], capture_output=True).stdout
+        y = np.frombuffer(raw, np.int16).astype(float)
+        db = lambda a, b: 20 * np.log10(np.sqrt(np.mean(y[int(a * 8000):int(b * 8000)] ** 2)) + 1e-9)
+        levels[duck] = (db(0.5, 2.5), db(3.8, 5.5))
+    assert abs(levels["off"][0] - levels["off"][1]) < 1
+    assert abs(levels["strong"][0] - levels["off"][0]) < 1       # 조용할 때는 그대로
+    assert levels["strong"][0] - levels["strong"][1] > 12        # 말할 때는 크게 줄어듦

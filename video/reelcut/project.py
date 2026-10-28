@@ -82,6 +82,7 @@ class MusicSettings:
     start: float = 0.0             # 음악에서 사용할 시작 위치
     volume: float = 1.0
     fade_out: float = 2.0          # 끝부분 페이드아웃(초)
+    duck: str = "off"              # 클립·작은 화면 소리(말소리)가 날 때 음악 줄이기: off | light | normal | strong
     bpm: float = 0.0               # 분석 결과 또는 직접 입력
     beat_offset: float = 0.0       # 비트 위치 미세 조정(초, +면 늦게)
     beats: list[float] = field(default_factory=list)

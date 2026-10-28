@@ -377,6 +377,19 @@ def windows_fonts_option() -> str:
     return f":fontsdir='{escaped}'"
 
 
+# 음악 줄이기 세기: (threshold, ratio). 보통 크기 말소리(RMS -20dB)일 때 음악이
+# 약하게 ≈ 9dB, 보통 ≈ 13dB, 세게 ≈ 18dB 줄어든다. -40dB 아래 잡음에는 반응하지 않는다
+DUCK_LEVELS = {"light": (0.02, 3), "normal": (0.015, 6), "strong": (0.01, 12)}
+
+
+def duck_filter(level: str) -> str:
+    """[음악][말소리] → 말소리가 나는 동안 음악 줄이기 (앞에 쉼표 없음, 없으면 빈 문자열)."""
+    if level not in DUCK_LEVELS:
+        return ""
+    threshold, ratio = DUCK_LEVELS[level]
+    return f"sidechaincompress=threshold={threshold}:ratio={ratio}:attack=30:release=500:knee=4"
+
+
 def fade_filters(fade_in: float, fade_out: float, total: float, kind: str) -> str:
     """영상(v)/소리(a) 시작·끝 페이드 필터들 (끝에 쉼표 포함, 없으면 빈 문자열)."""
     name = "fade" if kind == "v" else "afade"
@@ -458,7 +471,18 @@ def final_args(project: Project, concat_list: str, total: float, out_path: str,
         end = min(total, music_len)
         if music.fade_out > 0 and end > music.fade_out:
             chain += f",afade=t=out:st={_num(end - music.fade_out)}:d={_num(music.fade_out)}"
-        af.append(chain + "[am]")
+        duck = duck_filter(music.duck)
+        if duck:
+            # 원본·작은 화면 소리를 먼저 섞고, 그 소리로 음악을 누른다
+            af.append(f"{''.join(mix)}amix=inputs={len(mix)}:duration=first:normalize=0,asplit=2[voice][sc]"
+                      if len(mix) > 1 else "[a0]asplit=2[voice][sc]")
+            af.append(chain + "[am_raw]")
+            # 낮은 웅웅거림(바람·차 소리)에는 반응하지 않게 말소리 대역만 본다
+            af.append(f"[sc]highpass=f=120[sc_hp]")
+            af.append(f"[am_raw][sc_hp]{duck}[am]")
+            mix = ["[voice]"]
+        else:
+            af.append(chain + "[am]")
         mix.append("[am]")
         idx += 1
 

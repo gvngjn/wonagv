@@ -238,3 +238,21 @@ def test_clip_motion_reaches_segments():
     p = Project(clips=[Clip("p.jpg", 0, 0, 3, False, motion="pan_left"), Clip("v.mp4", 5)])
     assert [s.motion for s in build_segments(p)] == ["pan_left", "auto"]
     assert Project.from_dict({"clips": [{"path": "p.jpg"}]}).clips[0].motion == "auto"
+
+
+def test_music_ducking_graph():
+    from reelcut.render import duck_filter
+
+    assert duck_filter("off") == "" and duck_filter("bogus") == ""
+    p = Project()
+    p.music.path, p.music.duration, p.music.duck = "m.mp3", 30, "normal"
+    p.pips.append(PipOverlay("cam.mp4", start=1, src_duration=5, has_audio=True, volume=0.5))
+    graph = final_args(p, "list.txt", 10.0, "out.mp4", RenderOptions(320, 180, 30), None)
+    graph = graph[graph.index("-filter_complex") + 1]
+    # 원본+작은 화면 소리를 먼저 섞어서 음악을 누르는 신호로 쓴다
+    assert "amix=inputs=2:duration=first:normalize=0,asplit=2[voice][sc]" in graph
+    assert "[am_raw][sc_hp]sidechaincompress=threshold=0.015:ratio=6" in graph
+    assert "[voice][am]amix=inputs=2" in graph
+    p.pips.clear()
+    graph = final_args(p, "list.txt", 10.0, "out.mp4", RenderOptions(320, 180, 30), None)
+    assert "[a0]asplit=2[voice][sc]" in graph[graph.index("-filter_complex") + 1]

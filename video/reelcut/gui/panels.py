@@ -436,6 +436,10 @@ class MusicPanel(QWidget):
         self.vol_slider, vol_lbl = percent_slider(200)
         self.fade_spin = seconds_spin(30, 0.5, 1)
         self.clip_vol_slider, clip_vol_lbl = percent_slider(200)
+        self.duck = QComboBox()
+        for key, label in (("off", "줄이지 않음"), ("light", "약하게"), ("normal", "보통"), ("strong", "세게")):
+            self.duck.addItem(label, key)
+        self.duck.setToolTip("영상 원본·작은 화면에서 말소리가 나오는 동안 음악을 자동으로 줄였다가 다시 키워요")
         mf = QFormLayout(music_box)
         mf.addRow(row(self.url_edit, self.download_btn))
         mf.addRow(url_note)
@@ -445,6 +449,7 @@ class MusicPanel(QWidget):
         mf.addRow("음악 소리", row(self.vol_slider, vol_lbl))
         mf.addRow("끝 페이드아웃", self.fade_spin)
         mf.addRow("영상 원본 소리", row(self.clip_vol_slider, clip_vol_lbl))
+        mf.addRow("말할 때 음악 줄이기", self.duck)
 
         # 비트 분석
         beat_box = QGroupBox("템포·비트")
@@ -536,7 +541,8 @@ class MusicPanel(QWidget):
             w.valueChanged.connect(self._store)
         self.bpm_spin.valueChanged.connect(self._store)
         self.sync_check.toggled.connect(self._store)
-        for w in (self.per_cut, self.order, self.length_mode, self.transition, self.cut_mode, self.cut_unit):
+        for w in (self.per_cut, self.order, self.length_mode, self.transition, self.cut_mode, self.cut_unit,
+                  self.duck):
             w.currentIndexChanged.connect(self._store)
         self.reload()
 
@@ -548,6 +554,7 @@ class MusicPanel(QWidget):
         self.vol_slider.setValue(int(round(m.volume * 100)))
         self.fade_spin.setValue(m.fade_out)
         self.clip_vol_slider.setValue(int(round(ex.clip_volume * 100)))
+        self.duck.setCurrentIndex(max(0, self.duck.findData(m.duck)))
         self.bpm_spin.setValue(m.bpm)
         self.offset_spin.setValue(m.beat_offset)
         self.sync_check.setChecked(bs.enabled)
@@ -573,6 +580,7 @@ class MusicPanel(QWidget):
         m.bpm = self.bpm_spin.value()
         m.beat_offset = self.offset_spin.value()
         ex.clip_volume = self.clip_vol_slider.value() / 100
+        m.duck = self.duck.currentData()
         was = bs.enabled
         bs.enabled = self.sync_check.isChecked()
         bs.beats_per_cut = self.per_cut.currentData()
