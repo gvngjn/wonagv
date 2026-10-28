@@ -195,6 +195,8 @@ class ExportSettings:
     fade_in: float = 0.0           # 영상 시작 페이드 인(초, 검은 화면에서)
     fade_out: float = 0.0          # 영상 끝 페이드 아웃(초, 검은 화면으로 + 소리도 함께)
     loudness: float = -14.0        # 음량 자동 맞춤 목표(LUFS). 0이면 끔. -14 = 유튜브·릴스 권장
+    color: str = "none"            # 색감: none | warm | cool | bw | vivid | vintage
+    gpu: bool = True               # 내보낼 때 그래픽카드 인코더가 있으면 사용
     output: str = ""
 
 

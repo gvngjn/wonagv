@@ -145,6 +145,7 @@ class ClipsPanel(QWidget):
         self.speed = QComboBox()
         for sp in (0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0):
             self.speed.addItem(("보통 (1배)" if sp == 1 else f"{sp:g}배" + (" 느리게" if sp < 1 else " 빠르게")), sp)
+        self.speed.setCurrentIndex(self.speed.findData(1.0))
         self.speed.currentIndexChanged.connect(self._on_clip_props)
         self.motion = QComboBox()
         for key, label in MOTION_CHOICES:

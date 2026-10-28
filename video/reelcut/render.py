@@ -11,12 +11,13 @@ import shutil
 import tempfile
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable
 
 from . import cache
-from .ffmpeg import FFmpegError, ProcessRunner
+from . import hwenc, logs
+from .ffmpeg import Cancelled, FFmpegError, ProcessRunner
 from .project import PipOverlay, Project, Segment, SubtitleSettings, TitleSettings
 from .subtitles import save_srt
 from .timeline import beat_sync_active, build_segments
@@ -41,6 +42,7 @@ class RenderOptions:
     crf: int = 20
     preset: str = "medium"
     fit: str = "pad"
+    encoder: str = "libx264"       # 최종 영상 인코더 (조각은 항상 libx264)
 
 
 def fit_graph(src: str, out: str, w: int, h: int, fit: str) -> str:
@@ -377,6 +379,22 @@ def windows_fonts_option() -> str:
     return f":fontsdir='{escaped}'"
 
 
+# 색감 필터 (자막·제목은 이 뒤에 그려서 색이 바뀌지 않는다)
+COLOR_FILTERS = {
+    "warm": "colortemperature=temperature=4500:pl=0.4,eq=saturation=1.08",
+    "cool": "colortemperature=temperature=9000:pl=0.4",
+    "bw": "hue=s=0,eq=contrast=1.08",
+    "vivid": "eq=saturation=1.35:contrast=1.06",
+    "vintage": "curves=preset=vintage,eq=saturation=0.85",
+}
+
+
+def color_filter(kind: str) -> str:
+    """색감 필터 (뒤에 쉼표 포함, 없으면 빈 문자열)."""
+    f = COLOR_FILTERS.get(kind)
+    return f + "," if f else ""
+
+
 # 음악 줄이기 세기: (threshold, ratio). 보통 크기 말소리(RMS -20dB)일 때 음악이
 # 약하게 ≈ 9dB, 보통 ≈ 13dB, 세게 ≈ 18dB 줄어든다. -40dB 아래 잡음에는 반응하지 않는다
 DUCK_LEVELS = {"light": (0.02, 3), "normal": (0.015, 6), "strong": (0.01, 12)}
@@ -486,6 +504,10 @@ def final_args(project: Project, concat_list: str, total: float, out_path: str,
         mix.append("[am]")
         idx += 1
 
+    color = color_filter(project.export.color)
+    if color:
+        vf.append(f"{base}{color[:-1]}[vcolor]")
+        base = "[vcolor]"
     subs = project.subtitles
     if srt_name and subs.burn_in:
         style = ass_style(subs).replace("'", "")
@@ -514,7 +536,7 @@ def final_args(project: Project, concat_list: str, total: float, out_path: str,
     if soft_subs:
         args += ["-map", f"{idx}:s", "-c:s", "mov_text", "-metadata:s:s:0", "language=kor"]
     args += [
-        "-c:v", "libx264", "-preset", opt.preset, "-crf", str(opt.crf),
+        *hwenc.codec_args(opt.encoder, opt.crf, opt.preset),
         "-r", _num(opt.fps), "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "192k", "-ar", str(AUDIO_SR),
         "-movflags", "+faststart",
@@ -615,6 +637,7 @@ class Renderer:
         self.problems: list[str] = []     # 결과 자동 검사에서 찾은 문제
         self.use_cache = use_cache
         self.cache_hits = 0
+        self.encoder_used = hwenc.SOFTWARE
 
     def cancel(self) -> None:
         with self._lock:
@@ -688,6 +711,29 @@ class Renderer:
                     f.cancel()
                 raise
 
+    def _final(self, project, total, part, opt, srt_name, fonts_dir, titles_name, work, report) -> None:
+        """2단계: 최종 영상. 그래픽카드 인코딩이 실패하면 CPU(libx264)로 다시 만든다."""
+        def run(o: RenderOptions) -> None:
+            label = "최종 영상 만드는 중" + (f" ({hwenc.NAMES[o.encoder]} 그래픽카드)"
+                                         if o.encoder != hwenc.SOFTWARE else "")
+            self.encoder_used = o.encoder
+            self.runner.run(
+                final_args(project, "list.txt", total, str(part), o, srt_name, fonts_dir, titles_name),
+                lambda t: report(self._w1 + (1 - self._w1) * min(1.0, t / total), label),
+                cwd=str(work),
+            )
+
+        try:
+            run(opt)
+        except Cancelled:
+            raise
+        except FFmpegError as e:
+            if opt.encoder == hwenc.SOFTWARE or self.runner.cancelled:
+                raise
+            logs.exception(f"그래픽카드 인코딩 실패 ({opt.encoder}) → CPU로 다시", e)
+            hwenc.mark_broken(opt.encoder)
+            run(replace(opt, encoder=hwenc.SOFTWARE))
+
     def render(self, project: Project, out_path: str, preview: bool = False,
                on_progress: Callable[[float, str], None] | None = None) -> float:
         missing = project.missing_files()
@@ -703,7 +749,8 @@ class Renderer:
             h = max(2, int(ex.height * scale) // 2 * 2)
             opt = RenderOptions(w, h, ex.fps, crf=30, preset="ultrafast", fit=ex.fit)
         else:
-            opt = RenderOptions(ex.width // 2 * 2, ex.height // 2 * 2, ex.fps, ex.crf, ex.preset, ex.fit)
+            opt = RenderOptions(ex.width // 2 * 2, ex.height // 2 * 2, ex.fps, ex.crf, ex.preset, ex.fit,
+                                (hwenc.detect() or hwenc.SOFTWARE) if ex.gpu else hwenc.SOFTWARE)
 
         # 진행률에서 1단계가 차지하는 비율 (실측: 내보내기 약 절반, 저화질 미리보기 약 3/4)
         self._w1 = 0.75 if preview else 0.5
@@ -741,12 +788,8 @@ class Renderer:
             # 끝까지 성공했을 때만 진짜 이름으로 바꾼다 → 취소·오류 시 깨진 파일이 남거나
             # 같은 이름의 기존 영상이 지워지는 일이 없다
             part = temp_output_path(str(out_final))
-            args = final_args(project, "list.txt", total, str(part), opt, srt_name, fonts_dir, titles_name)
             try:
-                self.runner.run(
-                    args, lambda t: report(self._w1 + (1 - self._w1) * min(1.0, t / total), "최종 영상 만드는 중"),
-                    cwd=str(work),
-                )
+                self._final(project, total, part, opt, srt_name, fonts_dir, titles_name, work, report)
                 try:
                     os.replace(part, out_final)
                 except PermissionError as e:

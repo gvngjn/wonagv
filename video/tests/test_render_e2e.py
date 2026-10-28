@@ -301,3 +301,35 @@ def test_music_ducks_under_speech(tmp_path):
     assert abs(levels["off"][0] - levels["off"][1]) < 1
     assert abs(levels["strong"][0] - levels["off"][0]) < 1       # 조용할 때는 그대로
     assert levels["strong"][0] - levels["strong"][1] > 12        # 말할 때는 크게 줄어듦
+
+
+@needs_ffmpeg
+def test_every_color_filter_renders(media, tmp_path):
+    from reelcut.render import COLOR_FILTERS
+
+    for color in COLOR_FILTERS:
+        p = base_project(media)
+        p.clips = p.clips[:1]
+        p.export.color = color
+        out = tmp_path / f"{color}.mp4"
+        Renderer().render(p, str(out), preview=True)
+        assert probe(str(out)).duration > 2.5, color
+
+
+@needs_ffmpeg
+def test_gpu_encoder_failure_falls_back_to_cpu(media, tmp_path, monkeypatch):
+    """그래픽카드 인코더가 있다고 나왔는데 실제로 실패하면 CPU로 다시 만들어야 한다."""
+    from reelcut import hwenc
+
+    monkeypatch.setattr(hwenc, "_detected", "h264_nvenc")
+    monkeypatch.setattr(hwenc, "_broken", set())
+    monkeypatch.setattr(hwenc, "codec_args", lambda enc, crf, preset: (
+        ["-c:v", "this_encoder_does_not_exist"] if enc != hwenc.SOFTWARE else ["-c:v", "libx264", "-preset", "ultrafast"]))
+    p = base_project(media)
+    out = tmp_path / "gpu.mp4"
+    r = Renderer()
+    r.render(p, str(out))
+    assert probe(str(out)).duration == pytest.approx(7.0, abs=0.1)
+    assert r.encoder_used == hwenc.SOFTWARE and hwenc.detect() == ""   # 다음부터는 바로 CPU
+    p.export.gpu = False
+    assert Renderer().render(p, str(tmp_path / "cpu.mp4")) == pytest.approx(7.0)

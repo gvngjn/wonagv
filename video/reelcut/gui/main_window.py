@@ -44,6 +44,14 @@ FITS = [
     ("crop", "잘라서 꽉 채우기"),
     ("pad", "검은 여백 넣기"),
 ]
+COLORS = [
+    ("none", "색감 그대로"),
+    ("warm", "따뜻하게"),
+    ("cool", "차갑게"),
+    ("vivid", "선명하게"),
+    ("vintage", "빈티지"),
+    ("bw", "흑백"),
+]
 QUALITIES = [("높음 (파일 큼)", 18), ("보통", 21), ("작은 파일", 26)]
 FPS_CHOICES = [24.0, 25.0, 30.0, 60.0]
 
@@ -323,11 +331,19 @@ class MainWindow(QMainWindow):
         self.quality = QComboBox()
         for label, crf in QUALITIES:
             self.quality.addItem(label, crf)
-        for w in (self.size, self.fit, self.fps, self.quality):
+        self.color = QComboBox()
+        for key, label in COLORS:
+            self.color.addItem(label, key)
+        self.color.setToolTip("영상 전체 색감 (자막·제목 색은 그대로)")
+        for w in (self.size, self.fit, self.fps, self.quality, self.color):
             w.currentIndexChanged.connect(self._store_export)
         self.loud = QCheckBox("음량 자동 맞춤 (유튜브·릴스 권장 크기)")
         self.loud.setToolTip("노래와 원본 소리를 합친 최종 음량을 -14 LUFS로 맞춰요. 너무 작거나 커서 깨지는 걸 막아요.")
         self.loud.toggled.connect(self._store_export)
+        self.gpu = QCheckBox("그래픽카드로 빠르게")
+        self.gpu.setToolTip("NVIDIA·Intel·AMD 그래픽카드 인코더가 있으면 내보내기를 더 빨리 해요.\n"
+                            "안 되면 자동으로 원래 방식(CPU)으로 다시 만들어요.")
+        self.gpu.toggled.connect(self._store_export)
         self.fade = QComboBox()
         for (fi, fo), label in FADES:
             self.fade.addItem(label, f"{fi}/{fo}")
@@ -360,6 +376,7 @@ class MainWindow(QMainWindow):
         sl.addWidget(self.quality, 1)
         f.addRow("해상도·화질", settings)
         f.addRow("비율이 다른 영상", row_widget(self.fit, self.size_label))
+        f.addRow("색감", row_widget(self.color, self.gpu))
         f.addRow("시작·끝", row_widget(self.fade, self.loud))
         buttons = QWidget()
         bl = QHBoxLayout(buttons)
@@ -375,7 +392,7 @@ class MainWindow(QMainWindow):
 
     def _load_export_settings(self) -> None:
         ex = self.project.export
-        widgets = (self.size, self.fit, self.fps, self.quality, self.loud, self.fade)
+        widgets = (self.size, self.fit, self.fps, self.quality, self.loud, self.fade, self.color, self.gpu)
         for w in widgets:
             w.blockSignals(True)
         found = find_aspect(ex.width, ex.height)
@@ -387,7 +404,9 @@ class MainWindow(QMainWindow):
         self.aspect_group.setExclusive(True)
         self.size.setCurrentIndex(max(0, self.size.findData(size)))
         self.fit.setCurrentIndex(max(0, self.fit.findData(ex.fit)))
+        self.color.setCurrentIndex(max(0, self.color.findData(ex.color)))
         self.loud.setChecked(bool(ex.loudness))
+        self.gpu.setChecked(ex.gpu)
         key = f"{float(ex.fade_in)}/{float(ex.fade_out)}"
         if self.fade.findData(key) < 0:
             self.fade.addItem(f"사용자 지정 ({ex.fade_in:g}초 / {ex.fade_out:g}초)", key)
@@ -405,6 +424,8 @@ class MainWindow(QMainWindow):
         if checked is not None:
             ex.width, ex.height = ASPECTS[checked.property("aspect")][1][self.size.currentData()]
         ex.fit = self.fit.currentData()
+        ex.color = self.color.currentData()
+        ex.gpu = self.gpu.isChecked()
         ex.loudness = -14.0 if self.loud.isChecked() else 0.0
         ex.fade_in, ex.fade_out = (float(v) for v in self.fade.currentData().split("/"))
         ex.fps = self.fps.currentData()
@@ -635,7 +656,11 @@ class MainWindow(QMainWindow):
                 self.status.setText("미리보기 완성! 위에서 재생 중이에요.")
                 self.preview.load(path, autoplay=True, title="미리보기 (저화질)")
             else:
-                self.status.setText(f"내보내기 완료: {path}")
+                from .. import hwenc
+
+                enc = renderer.encoder_used
+                how = f" ({hwenc.NAMES.get(enc, enc)} 그래픽카드 사용)" if enc != hwenc.SOFTWARE else ""
+                self.status.setText(f"내보내기 완료{how}: {path}")
                 box = QMessageBox(self)
                 box.setWindowTitle("ReelCut")
                 box.setText(f"영상을 만들었어요!\n{path}")

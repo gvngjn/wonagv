@@ -256,3 +256,30 @@ def test_music_ducking_graph():
     p.pips.clear()
     graph = final_args(p, "list.txt", 10.0, "out.mp4", RenderOptions(320, 180, 30), None)
     assert "[a0]asplit=2[voice][sc]" in graph[graph.index("-filter_complex") + 1]
+
+
+def test_color_filter_before_subtitles():
+    from reelcut.render import COLOR_FILTERS, color_filter
+
+    assert color_filter("none") == "" and color_filter("bogus") == ""
+    assert set(COLOR_FILTERS) == {"warm", "cool", "bw", "vivid", "vintage"}
+    p = Project()
+    p.export.color = "bw"
+    p.subtitles.entries.append(SubtitleEntry(0, 1, "a"))
+    args = final_args(p, "list.txt", 5.0, "out.mp4", RenderOptions(320, 180, 30), "subs.srt")
+    graph = args[args.index("-filter_complex") + 1]
+    assert graph.index("hue=s=0") < graph.index("subtitles=subs.srt")   # 자막 색은 그대로
+    assert Project.from_dict({}).export.color == "none"
+
+
+def test_gpu_codec_args():
+    from reelcut import hwenc
+
+    assert hwenc.codec_args("libx264", 20, "medium") == ["-c:v", "libx264", "-preset", "medium", "-crf", "20"]
+    nv = hwenc.codec_args("h264_nvenc", 20, "medium")
+    assert nv[:2] == ["-c:v", "h264_nvenc"] and nv[nv.index("-cq") + 1] == "22"
+    assert "-global_quality" in hwenc.codec_args("h264_qsv", 20, "medium")
+    assert "-qp_i" in hwenc.codec_args("h264_amf", 20, "medium")
+    p = Project()
+    args = final_args(p, "list.txt", 5.0, "out.mp4", RenderOptions(320, 180, 30, encoder="h264_nvenc"), None)
+    assert args[args.index("-c:v") + 1] == "h264_nvenc"
