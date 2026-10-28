@@ -15,12 +15,13 @@ from PySide6.QtWidgets import (
 from .. import subtitles as subs
 from ..ffmpeg import probe
 from ..project import Clip, PipOverlay, Project, SubtitleEntry
+from ..photos import readable_image
 from ..render import is_image
 from .music_gauge import MusicGauge, MusicPreviewPlayer
 from .thumbnails import THUMB_H, THUMB_W, ThumbnailLoader
 from .subtitle_style import ColorButton, SubtitleSample, font_file_families, register_font_file
 
-VIDEO_FILTER = "영상·사진 (*.mp4 *.mov *.mkv *.avi *.webm *.m4v *.wmv *.jpg *.jpeg *.png *.bmp *.webp);;모든 파일 (*)"
+VIDEO_FILTER = "영상·사진 (*.mp4 *.mov *.mkv *.avi *.webm *.m4v *.wmv *.jpg *.jpeg *.png *.bmp *.webp *.heic *.heif);;모든 파일 (*)"
 AUDIO_FILTER = "음악 (*.mp3 *.wav *.m4a *.aac *.flac *.ogg *.opus *.wma *.mp4);;모든 파일 (*)"
 IMAGE_DEFAULT_SECONDS = 3.0
 
@@ -67,6 +68,7 @@ def row(*widgets) -> QWidget:
 
 def make_clip(path: str) -> Clip:
     if is_image(path):
+        readable_image(path)        # HEIC는 여기서 미리 바꿔 두고, 못 읽으면 바로 알린다
         return Clip(path, duration=0.0, in_point=0.0, out_point=IMAGE_DEFAULT_SECONDS, has_audio=False)
     info = probe(path)
     if not info.has_video:

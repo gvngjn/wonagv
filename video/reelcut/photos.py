@@ -1,0 +1,52 @@
+"""사진 파일 준비: 아이폰 HEIC 사진은 ffmpeg가 못 읽는 경우가 많아서 JPG로 바꿔 둔다.
+
+프로젝트에는 원본 경로를 그대로 두고, 렌더링·썸네일 때만 바꾼 파일을 쓴다
+(같은 사진은 한 번만 바꾸고 다시 쓴다).
+"""
+from __future__ import annotations
+
+import hashlib
+import os
+import threading
+from pathlib import Path
+
+from .autosave import data_dir
+
+HEIC_EXTS = {".heic", ".heif"}
+_lock = threading.Lock()
+
+
+def is_heic(path: str) -> bool:
+    return Path(path).suffix.lower() in HEIC_EXTS
+
+
+def converted_dir() -> Path:
+    return data_dir() / "photos"
+
+
+def readable_image(path: str) -> str:
+    """ffmpeg·Qt가 읽을 수 있는 사진 경로 (HEIC면 바꾼 JPG, 아니면 원본 그대로)."""
+    if not is_heic(path):
+        return path
+    st = os.stat(path)
+    key = hashlib.sha1(f"{os.path.abspath(path)}|{st.st_size}|{st.st_mtime_ns}".encode()).hexdigest()[:16]
+    out = converted_dir() / f"{Path(path).stem}_{key}.jpg"
+    with _lock:
+        if out.exists() and out.stat().st_size > 0:
+            return str(out)
+        try:
+            import pillow_heif
+            from PIL import Image, ImageOps
+        except ImportError as e:  # 설치본에는 항상 들어 있다
+            raise RuntimeError("HEIC 사진을 읽으려면 pillow-heif가 필요해요 (pip install pillow-heif).") from e
+        pillow_heif.register_heif_opener()
+        try:
+            with Image.open(path) as im:
+                im = ImageOps.exif_transpose(im).convert("RGB")   # 세로로 찍은 사진은 세로로
+                out.parent.mkdir(parents=True, exist_ok=True)
+                tmp = out.with_suffix(".part.jpg")
+                im.save(tmp, "JPEG", quality=95)
+                os.replace(tmp, out)
+        except Exception as e:  # noqa: BLE001 - 사용자에게 알기 쉬운 메시지로
+            raise RuntimeError(f"HEIC 사진을 읽지 못했어요: {Path(path).name} ({e})") from e
+    return str(out)

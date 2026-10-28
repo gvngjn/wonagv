@@ -4,9 +4,10 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 
 from PySide6.QtCore import QObject, Qt, Signal
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QImageReader, QPixmap
 
 from ..ffmpeg import thumbnail_png
+from ..photos import readable_image
 from ..render import is_image
 
 THUMB_W = 96
@@ -39,7 +40,12 @@ class ThumbnailLoader(QObject):
         if k in self._cache:
             return self._cache[k]
         if is_image(path):
-            pm = QPixmap(path)
+            try:
+                reader = QImageReader(readable_image(path))
+            except (OSError, RuntimeError):
+                return None
+            reader.setAutoTransform(True)       # 세로로 찍은 사진(EXIF 회전)도 바르게
+            pm = QPixmap.fromImage(reader.read())
             if not pm.isNull():
                 pm = fit_box(pm)
                 self._cache[k] = pm

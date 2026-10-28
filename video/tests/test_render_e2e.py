@@ -384,3 +384,34 @@ def test_hdr_phone_video_keeps_colors(tmp_path):
     rgb = np.frombuffer(raw, np.uint8).reshape(-1, 3).astype(int)
     saturation = (rgb.max(1) - rgb.min(1)).mean()
     assert saturation > 170        # 바랜 채로 나오면 약 90
+
+
+@needs_ffmpeg
+def test_iphone_heic_photo(tmp_path):
+    """아이폰 HEIC 사진(세로로 찍어 EXIF 회전)도 바르게 들어가야 한다."""
+    pillow_heif = pytest.importorskip("pillow_heif")
+    import numpy as np
+    from PIL import Image
+
+    from reelcut.photos import readable_image
+
+    pillow_heif.register_heif_opener()
+    im = Image.new("RGB", (400, 300), "red")
+    im.paste((0, 0, 255), (0, 0, 400, 150))       # 저장은 가로, 위쪽 절반 파랑
+    exif = im.getexif()
+    exif[0x0112] = 6                                # 90° 돌려서 보기 → 세로 사진, 오른쪽이 파랑
+    src = tmp_path / "IMG_0001.HEIC"
+    im.save(src, exif=exif.tobytes())
+
+    jpg = readable_image(str(src))
+    assert jpg.endswith(".jpg") and Image.open(jpg).size == (300, 400)
+    assert readable_image(str(src)) == jpg          # 두 번째는 바꿔 둔 파일 재사용
+
+    p = Project(clips=[Clip(str(src), 0, 0, 1.0, has_audio=False, motion="none")])
+    p.export.width, p.export.height, p.export.fps, p.export.preset, p.export.fit = 300, 400, 25, "ultrafast", "crop"
+    out = tmp_path / "photo.mp4"
+    Renderer(use_cache=False).render(p, str(out))
+    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", str(out), "-frames:v", "1", "-f", "rawvideo",
+                          "-pix_fmt", "rgb24", "-"], capture_output=True).stdout
+    rgb = np.frombuffer(raw, np.uint8).reshape(400, 300, 3).astype(int)
+    assert rgb[200, 250, 2] > 150 and rgb[200, 50, 0] > 150    # 오른쪽 파랑, 왼쪽 빨강

@@ -19,12 +19,13 @@ from typing import Callable
 from . import cache
 from . import hwenc, logs
 from .ffmpeg import Cancelled, FFmpegError, ProcessRunner, hdr_transfer
+from .photos import readable_image
 from .project import PipOverlay, Project, Segment, SubtitleSettings, TitleSettings
 from .subtitles import save_srt
 from .timeline import beat_sync_active, build_segments, segment_starts
 
 AUDIO_SR = 48000
-IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".gif"}
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".gif", ".heic", ".heif"}
 
 
 def is_image(path: str) -> bool:
@@ -188,7 +189,7 @@ def segment_args(seg: Segment, out_path: str, opt: RenderOptions, transition: st
     hdr = ""
     if is_image(seg.path):
         motion = resolve_motion(seg.motion, index)
-        args += ["-loop", "1", "-framerate", _num(opt.fps), "-t", _num(dur + 0.5), "-i", seg.path]
+        args += ["-loop", "1", "-framerate", _num(opt.fps), "-t", _num(dur + 0.5), "-i", readable_image(seg.path)]
         has_audio = False
     else:
         speed = min(4.0, max(0.25, seg.speed or 1.0))
@@ -496,7 +497,7 @@ def final_args(project: Project, concat_list: str, total: float, out_path: str,
             continue
         span = end - start
         if is_image(p.path):
-            args += ["-loop", "1", "-framerate", _num(opt.fps), "-t", _num(span), "-i", p.path]
+            args += ["-loop", "1", "-framerate", _num(opt.fps), "-t", _num(span), "-i", readable_image(p.path)]
             has_audio = False
         else:
             if p.src_start > 0:
@@ -621,7 +622,8 @@ def still_args(path: str, at: float, out_path: str, project: Project) -> list[st
     hdr = "" if is_image(path) else hdr_transfer(path)
     graph = (fit_graph("[0:v]" + tonemap_filter(hdr), "[fit]", w, h, ex.fit)
              + f";[fit]{color_filter(ex.color)}format=rgb24[v]")
-    args += ["-i", path, "-filter_complex", graph, "-map", "[v]", "-frames:v", "1"]
+    args += ["-i", readable_image(path) if is_image(path) else path,
+             "-filter_complex", graph, "-map", "[v]", "-frames:v", "1"]
     if out_path.lower().endswith((".jpg", ".jpeg")):
         args += ["-q:v", "2"]
     return args + ["-update", "1", out_path]

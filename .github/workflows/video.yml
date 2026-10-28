@@ -18,7 +18,7 @@ jobs:
       - name: ffmpeg 설치
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - name: 테스트 도구 설치
-        run: pip install numpy pytest yt-dlp
+        run: pip install numpy pytest yt-dlp pillow-heif
       - name: 단위·통합 테스트
         run: python -m pytest -q video/tests
 
@@ -38,7 +38,7 @@ jobs:
       - name: 실행 파일 만들기
         run: >
           pyinstaller --noconfirm --windowed --name ReelCut
-          --collect-all faster_whisper --collect-all ctranslate2
+          --collect-all faster_whisper --collect-all ctranslate2 --collect-all pillow_heif
           --collect-all yt_dlp_ejs --collect-submodules yt_dlp
           run_reelcut.py
       - name: FFmpeg 함께 넣기
