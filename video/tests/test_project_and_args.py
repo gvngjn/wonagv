@@ -368,3 +368,32 @@ def test_folder_scan_and_photo_date(tmp_path):
     assert shot_time(str(tmp_path / "photo.jpg")) == parse_time("2025-03-14T20:30:00+09:00")
     assert shot_time(str(tmp_path / "b.MP4")) > 0                     # 날짜 정보가 없으면 파일 시각
     assert shot_time(str(tmp_path / "b.MP4"), created=123456789.0) == 123456789.0
+
+
+def test_reels_safe_area():
+    from reelcut.project import SubtitleSettings, TitleEntry
+    from reelcut.render import NO_INSETS, REELS_INSETS, ass_style, safe_insets, safe_subtitles, titles_ass
+
+    assert safe_insets(1080, 1920) == REELS_INSETS
+    assert safe_insets(1920, 1080) == NO_INSETS and safe_insets(1080, 1080) == NO_INSETS
+    assert safe_insets(1080, 1920, enabled=False) == NO_INSETS
+    s = safe_subtitles(SubtitleSettings(margin_v=24), REELS_INSETS)
+    assert s.margin_v == 63 and s.margin_r == 50 and "MarginR=50" in ass_style(s)   # 아래 22%, 오른쪽 13%
+    assert safe_subtitles(SubtitleSettings(margin_v=100), REELS_INSETS).margin_v == 100   # 이미 높으면 그대로
+    assert safe_subtitles(SubtitleSettings(position="middle"), REELS_INSETS).margin_v == 24
+    # 작은 화면(오른쪽 아래)도 버튼·설명 밖으로
+    w, x, y = pip_geometry(PipOverlay("cam.mp4"), 1080, 1920, REELS_INSETS)
+    assert x.endswith(f"-{round(1080 * 0.13)}") and y.endswith(f"-{round(1920 * 0.22)}")
+    p = Project()
+    p.titles.entries = [TitleEntry(0, 2, "DAY 1")]
+    p.titles.position = "bottom"
+    style = [l for l in titles_ass(p.titles, 1080, 1920, REELS_INSETS).splitlines() if l.startswith("Style:")][0]
+    assert style.endswith(f",{round(1080 * 0.13)},{round(1920 * 0.22)},1")
+
+
+def test_safe_guide_only_in_preview_option():
+    p = Project(clips=[Clip("a.mp4", 5)])
+    args = final_args(p, "list.txt", 5.0, "o.mp4", RenderOptions(1080, 1920, 30, safe_guide=True), None)
+    assert args[args.index("-filter_complex") + 1].count("drawbox") == 3
+    args = final_args(p, "list.txt", 5.0, "o.mp4", RenderOptions(1080, 1920, 30), None)
+    assert "drawbox" not in args[args.index("-filter_complex") + 1]

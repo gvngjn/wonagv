@@ -45,6 +45,7 @@ class RenderOptions:
     preset: str = "medium"
     fit: str = "pad"
     encoder: str = "libx264"       # 최종 영상 인코더 (조각은 항상 libx264)
+    safe_guide: bool = False       # 미리보기에 릴스 가림 영역 표시
 
 
 def tonemap_filter(transfer: str) -> str:
@@ -219,15 +220,29 @@ def segment_args(seg: Segment, out_path: str, opt: RenderOptions, transition: st
     return args
 
 
-def pip_geometry(p: PipOverlay, w: int, h: int) -> tuple[int, str, str]:
+# 릴스·쇼츠 화면에서 앱 UI가 가리는 곳 (화면 비율, 대략값):
+# 위 = 상단 메뉴, 아래 = 설명·음악·프로필, 오른쪽 = 좋아요·댓글·공유 버튼
+REELS_INSETS = (0.12, 0.22, 0.13)      # (위, 아래, 오른쪽)
+NO_INSETS = (0.0, 0.0, 0.0)
+
+
+def safe_insets(w: int, h: int, enabled: bool = True) -> tuple[float, float, float]:
+    """세로 영상(9:16 근처)일 때만 피할 영역을 돌려준다."""
+    return REELS_INSETS if enabled and w > 0 and h / w >= 1.6 else NO_INSETS
+
+
+def pip_geometry(p: PipOverlay, w: int, h: int,
+                 insets: tuple[float, float, float] = NO_INSETS) -> tuple[int, str, str]:
     """(PiP 너비 px, overlay x 식, overlay y 식)"""
     pw = max(16, int(round(w * p.size / 2)) * 2)
     m = int(round(w * p.margin))
+    top, bottom, right = (max(m, int(round(h * insets[0]))), max(m, int(round(h * insets[1]))),
+                          max(m, int(round(w * insets[2]))))
     pos = {
-        "top-left": (f"{m}", f"{m}"),
-        "top-right": (f"main_w-overlay_w-{m}", f"{m}"),
-        "bottom-left": (f"{m}", f"main_h-overlay_h-{m}"),
-        "bottom-right": (f"main_w-overlay_w-{m}", f"main_h-overlay_h-{m}"),
+        "top-left": (f"{m}", f"{top}"),
+        "top-right": (f"main_w-overlay_w-{right}", f"{top}"),
+        "bottom-left": (f"{m}", f"main_h-overlay_h-{bottom}"),
+        "bottom-right": (f"main_w-overlay_w-{right}", f"main_h-overlay_h-{bottom}"),
         "center": ("(main_w-overlay_w)/2", "(main_h-overlay_h)/2"),
     }
     if p.position == "custom":
@@ -263,6 +278,18 @@ def ass_color(hex_color: str, alpha: int = 0) -> str:
     return f"&H{alpha:02X}{b}{g}{r}".upper()
 
 
+def safe_subtitles(s: SubtitleSettings, insets: tuple[float, float, float]) -> SubtitleSettings:
+    """가려지는 곳을 피하도록 여백을 늘린 자막 설정 (자막 좌표는 높이 288 기준)."""
+    if insets == NO_INSETS:
+        return s
+    margin = s.margin_v
+    if s.position == "bottom":
+        margin = max(margin, int(round(288 * insets[1])))
+    elif s.position == "top":
+        margin = max(margin, int(round(288 * insets[0])))
+    return replace(s, margin_v=margin, margin_r=max(s.margin_r, int(round(384 * insets[2]))))
+
+
 def ass_style(s: SubtitleSettings) -> str:
     name = s.font_name.replace(",", " ").replace("'", "")
     parts = [
@@ -276,6 +303,8 @@ def ass_style(s: SubtitleSettings) -> str:
     else:
         parts += ["BorderStyle=1", f"OutlineColour={ass_color(s.outline_color)}", f"Outline={s.outline}"]
     parts += ["Shadow=0", f"Alignment={_ALIGN.get(s.position, 2)}", f"MarginV={s.margin_v}"]
+    if s.margin_r != 10:
+        parts.append(f"MarginR={s.margin_r}")
     return ",".join(parts)
 
 
@@ -380,12 +409,17 @@ def animated_subs_ass(entries, animation: str) -> str:
     return "\n".join(lines) + "\n"
 
 
-def titles_ass(t: TitleSettings, w: int, h: int) -> str:
+def titles_ass(t: TitleSettings, w: int, h: int, insets: tuple[float, float, float] = NO_INSETS) -> str:
     """제목용 ASS 자막 파일 내용 (화면 크기 그대로를 좌표로 사용)."""
     size = max(8, int(round(h * t.size / 100)))
     outline = round(h * t.outline / 100, 1)
     align = {"top": 8, "center": 5, "bottom": 2}.get(t.position, 5)     # ASS 숫자패드 정렬
     margin = int(round(h * 0.08))
+    if t.position == "bottom":
+        margin = max(margin, int(round(h * insets[1])))
+    elif t.position == "top":
+        margin = max(margin, int(round(h * insets[0])))
+    margin_r = max(int(w * 0.05), int(round(w * insets[2])))
     name = t.font_name.replace(",", " ")
     fade = int(round(max(0.0, t.fade) * 1000))
     lines = [
@@ -397,7 +431,7 @@ def titles_ass(t: TitleSettings, w: int, h: int) -> str:
         "Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
         f"Style: Title,{name},{size},{ass_color(t.color)},{ass_color(t.color)},{ass_color(t.outline_color)},"
         f"&H80000000,{-1 if t.bold else 0},0,0,0,100,100,0,0,1,{outline},{round(outline / 2, 1)},"
-        f"{align},{int(w * 0.05)},{int(w * 0.05)},{margin},1",
+        f"{align},{int(w * 0.05)},{margin_r},{margin},1",
         "", "[Events]",
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
     ]
@@ -485,6 +519,7 @@ def final_args(project: Project, concat_list: str, total: float, out_path: str,
     vf: list[str] = []
     af: list[str] = []
     mix: list[str] = ["[a0]"]
+    insets = safe_insets(opt.width, opt.height, project.export.reels_safe)
     # 이어붙인 조각들의 시간 기록은 인코더의 프레임 배치에 따라 조금씩 밀릴 수 있어서,
     # 프레임/샘플 번호로 시간을 다시 매긴다 (조각마다 프레임 수가 정확하므로 오차 없음)
     af.append(f"[0:a]asettb=AVTB,asetpts=N/SR/TB,volume={_num(project.export.clip_volume)}[a0]")
@@ -504,7 +539,7 @@ def final_args(project: Project, concat_list: str, total: float, out_path: str,
                 args += ["-ss", _num(p.src_start)]
             args += ["-t", _num(span), "-i", p.path]
             has_audio = p.has_audio
-        pw, x, y = pip_geometry(p, opt.width, opt.height)
+        pw, x, y = pip_geometry(p, opt.width, opt.height, insets)
         hdr = "" if is_image(p.path) else hdr_transfer(p.path)
         chain = f"[{idx}:v]{tonemap_filter(hdr)}scale={pw}:-2,setsar=1"
         if p.border > 0:
@@ -558,12 +593,22 @@ def final_args(project: Project, concat_list: str, total: float, out_path: str,
         base = "[vcolor]"
     subs = project.subtitles
     if srt_name and subs.burn_in:
-        style = ass_style(subs).replace("'", "")
+        style = ass_style(safe_subtitles(subs, insets)).replace("'", "")
         vf.append(f"{base}subtitles={srt_name}:charenc=UTF-8{fonts_option(fonts_dir)}:force_style='{style}'[vsub]")
         base = "[vsub]"
     if titles_name:
         vf.append(f"{base}subtitles={titles_name}{fonts_option(fonts_dir)}[vtitle]")
         base = "[vtitle]"
+    if opt.safe_guide:
+        guide = safe_insets(opt.width, opt.height)
+        if guide != NO_INSETS:
+            # 미리보기 전용: 릴스 화면에서 가려지는 곳을 붉게
+            top, bottom, right = (int(opt.height * guide[0]), int(opt.height * guide[1]),
+                                  int(opt.width * guide[2]))
+            vf.append(f"{base}drawbox=x=0:y=0:w=iw:h={top}:color=red@0.3:t=fill,"
+                      f"drawbox=x=0:y=ih-{bottom}:w=iw:h={bottom}:color=red@0.3:t=fill,"
+                      f"drawbox=x=iw-{right}:y={top}:w={right}:h=ih-{top + bottom}:color=red@0.3:t=fill[vguide]")
+            base = "[vguide]"
     vf.append(f"{base}{fade_filters(project.export.fade_in, project.export.fade_out, total, 'v')}"
               f"trim=duration={_num(total)},setpts=PTS-STARTPTS,format=yuv420p[vout]")
 
@@ -840,7 +885,7 @@ class Renderer:
             scale = min(1.0, 640 / max(ex.width, ex.height))
             w = max(2, int(ex.width * scale) // 2 * 2)
             h = max(2, int(ex.height * scale) // 2 * 2)
-            opt = RenderOptions(w, h, ex.fps, crf=30, preset="ultrafast", fit=ex.fit)
+            opt = RenderOptions(w, h, ex.fps, crf=30, preset="ultrafast", fit=ex.fit, safe_guide=ex.safe_guide)
         else:
             opt = RenderOptions(ex.width // 2 * 2, ex.height // 2 * 2, ex.fps, ex.crf, ex.preset, ex.fit,
                                 (hwenc.detect() or hwenc.SOFTWARE) if ex.gpu else hwenc.SOFTWARE)
@@ -876,7 +921,9 @@ class Renderer:
                     font_styles.append(project.subtitles)
             if any(e.text.strip() for e in project.titles.entries):
                 titles_name = "titles.ass"
-                (work / titles_name).write_text(titles_ass(project.titles, opt.width, opt.height),
+                (work / titles_name).write_text(titles_ass(project.titles, opt.width, opt.height,
+                                                           safe_insets(opt.width, opt.height,
+                                                                       project.export.reels_safe)),
                                                 encoding="utf-8")
                 font_styles.append(project.titles)
             fonts_dir = prepare_fonts(font_styles, work) if font_styles else None

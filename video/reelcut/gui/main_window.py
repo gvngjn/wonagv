@@ -392,6 +392,12 @@ class MainWindow(QMainWindow):
         self.gpu.setToolTip("NVIDIA·Intel·AMD 그래픽카드 인코더가 있으면 내보내기를 더 빨리 해요.\n"
                             "안 되면 자동으로 원래 방식(CPU)으로 다시 만들어요.")
         self.gpu.toggled.connect(self._store_export)
+        self.reels_safe = QCheckBox("릴스 가림 영역 피하기")
+        self.reels_safe.setToolTip("세로 영상일 때 자막·제목·작은 화면을 릴스 화면의 설명·버튼이 가리는 곳 밖으로 옮겨요")
+        self.reels_safe.toggled.connect(self._store_export)
+        self.safe_guide = QCheckBox("미리보기에 가림 영역 표시")
+        self.safe_guide.setToolTip("릴스 화면에서 위쪽 메뉴·아래쪽 설명·오른쪽 버튼에 가려지는 곳을 미리보기에 붉게 표시해요 (내보내기에는 안 들어가요)")
+        self.safe_guide.toggled.connect(self._store_export)
         self.fade = QComboBox()
         for (fi, fo), label in FADES:
             self.fade.addItem(label, f"{fi}/{fo}")
@@ -428,6 +434,7 @@ class MainWindow(QMainWindow):
         f.addRow("해상도·화질", settings)
         f.addRow("비율이 다른 영상", row_widget(self.fit, self.size_label))
         f.addRow("색감", row_widget(self.color, self.gpu))
+        f.addRow("릴스", row_widget(self.reels_safe, self.safe_guide))
         f.addRow("시작·끝", row_widget(self.fade, self.loud))
         buttons = QWidget()
         bl = QHBoxLayout(buttons)
@@ -444,7 +451,8 @@ class MainWindow(QMainWindow):
 
     def _load_export_settings(self) -> None:
         ex = self.project.export
-        widgets = (self.size, self.fit, self.fps, self.quality, self.loud, self.fade, self.color, self.gpu)
+        widgets = (self.size, self.fit, self.fps, self.quality, self.loud, self.fade, self.color, self.gpu,
+                   self.reels_safe, self.safe_guide)
         for w in widgets:
             w.blockSignals(True)
         found = find_aspect(ex.width, ex.height)
@@ -459,6 +467,8 @@ class MainWindow(QMainWindow):
         self.color.setCurrentIndex(max(0, self.color.findData(ex.color)))
         self.loud.setChecked(bool(ex.loudness))
         self.gpu.setChecked(ex.gpu)
+        self.reels_safe.setChecked(ex.reels_safe)
+        self.safe_guide.setChecked(ex.safe_guide)
         key = f"{float(ex.fade_in)}/{float(ex.fade_out)}"
         if self.fade.findData(key) < 0:
             self.fade.addItem(f"사용자 지정 ({ex.fade_in:g}초 / {ex.fade_out:g}초)", key)
@@ -478,6 +488,8 @@ class MainWindow(QMainWindow):
         ex.fit = self.fit.currentData()
         ex.color = self.color.currentData()
         ex.gpu = self.gpu.isChecked()
+        ex.reels_safe = self.reels_safe.isChecked()
+        ex.safe_guide = self.safe_guide.isChecked()
         ex.loudness = -14.0 if self.loud.isChecked() else 0.0
         ex.fade_in, ex.fade_out = (float(v) for v in self.fade.currentData().split("/"))
         ex.fps = self.fps.currentData()

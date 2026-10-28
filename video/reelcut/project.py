@@ -127,6 +127,7 @@ class SubtitleSettings:
     box: bool = False              # 글자 뒤에 반투명 상자
     position: str = "bottom"       # bottom | middle | top
     margin_v: int = 24
+    margin_r: int = 10             # 오른쪽 여백 (릴스 버튼 피하기용, 너비 384 기준)
     animation: str = "none"        # 영상에 입힐 때 등장 효과: none | fade(스르륵) | pop(톡 튀어나오기)
     model: str = "small"
     language: str = "ko"           # "" = 자동 감지
@@ -199,6 +200,8 @@ class ExportSettings:
     loudness: float = -14.0        # 음량 자동 맞춤 목표(LUFS). 0이면 끔. -14 = 유튜브·릴스 권장
     color: str = "none"            # 색감: none | warm | cool | bw | vivid | vintage
     gpu: bool = True               # 내보낼 때 그래픽카드 인코더가 있으면 사용
+    reels_safe: bool = True        # 세로 영상이면 자막·제목·작은 화면을 릴스 화면 UI가 가리는 곳 밖으로
+    safe_guide: bool = False       # 미리보기에 가려지는 곳 표시
     output: str = ""
 
 
