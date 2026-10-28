@@ -210,3 +210,31 @@ def test_speed_and_volume_args():
     assert "setpts=(PTS-STARTPTS)/2" in g and "atempo=2," in g and "volume=0.5," in g
     muted = segment_args(Segment("v.mp4", 0, 1.0, True, volume=0.0), "o.mkv", RenderOptions(320, 180, 30))
     assert "anullsrc" in " ".join(muted)
+
+
+def test_photo_motion_only_for_images():
+    from reelcut.render import motion_filter, resolve_motion
+
+    assert [resolve_motion("auto", i) for i in range(5)] == ["zoom_in", "pan_right", "zoom_out", "pan_left", "zoom_in"]
+    assert resolve_motion("weird", 0) == "none" and motion_filter("none", 320, 180, 30, 60, 2.0) == ""
+    m = motion_filter("zoom_in", 320, 180, 30, 60, 2.0)
+    assert "zoompan" in m and "d=60" in m and "s=320x180" in m and "scale=960:540" in m
+    # 짧은 컷은 덜 움직이고, 길어도 15%까지만
+    assert "0.0400" in motion_filter("zoom_in", 320, 180, 30, 15, 0.5)
+    assert "0.1500" in motion_filter("zoom_in", 320, 180, 30, 300, 10.0)
+
+    photo = segment_args(Segment("p.jpg", 0, 2.0, False, motion="auto"), "o.mkv", RenderOptions(320, 180, 30), index=1)
+    graph = photo[photo.index("-filter_complex") + 1]
+    assert "zoompan" in graph and "(iw-iw/zoom)*min(1,on/59)" in graph   # 1번 조각 → 오른쪽으로 이동
+    video = segment_args(Segment("v.mp4", 0, 2.0, motion="auto"), "o.mkv", RenderOptions(320, 180, 30))
+    assert "zoompan" not in video[video.index("-filter_complex") + 1]
+    still = segment_args(Segment("p.jpg", 0, 2.0, False, motion="none"), "o.mkv", RenderOptions(320, 180, 30))
+    assert "zoompan" not in still[still.index("-filter_complex") + 1]
+
+
+def test_clip_motion_reaches_segments():
+    from reelcut.timeline import build_segments
+
+    p = Project(clips=[Clip("p.jpg", 0, 0, 3, False, motion="pan_left"), Clip("v.mp4", 5)])
+    assert [s.motion for s in build_segments(p)] == ["pan_left", "auto"]
+    assert Project.from_dict({"clips": [{"path": "p.jpg"}]}).clips[0].motion == "auto"

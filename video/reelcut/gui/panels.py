@@ -76,6 +76,16 @@ def make_clip(path: str) -> Clip:
 
 # ------------------------------------------------------------------ 클립
 
+MOTION_CHOICES = [
+    ("auto", "자동 (사진마다 번갈아)"),
+    ("zoom_in", "천천히 확대"),
+    ("zoom_out", "천천히 축소"),
+    ("pan_right", "오른쪽으로 이동"),
+    ("pan_left", "왼쪽으로 이동"),
+    ("none", "움직이지 않음"),
+]
+
+
 def delete_key(widget: QWidget, fn) -> None:
     """목록에서 Delete(맥: Backspace) 키로 선택한 항목 지우기. 칸을 고치는 중에는 그대로 글자 지우기."""
     for key in (QKeySequence.Delete, QKeySequence(Qt.Key_Backspace)):
@@ -136,6 +146,11 @@ class ClipsPanel(QWidget):
         for sp in (0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0):
             self.speed.addItem(("보통 (1배)" if sp == 1 else f"{sp:g}배" + (" 느리게" if sp < 1 else " 빠르게")), sp)
         self.speed.currentIndexChanged.connect(self._on_clip_props)
+        self.motion = QComboBox()
+        for key, label in MOTION_CHOICES:
+            self.motion.addItem(label, key)
+        self.motion.setToolTip("사진이 가만히 있지 않고 천천히 확대·이동해요 (켄 번즈 효과)")
+        self.motion.currentIndexChanged.connect(self._on_clip_props)
         self.clip_vol, clip_vol_lbl = percent_slider(200)
         self.clip_vol.valueChanged.connect(self._on_clip_props)
         self.clip_mute = QCheckBox("음소거")
@@ -144,6 +159,7 @@ class ClipsPanel(QWidget):
         form.addRow("시작", row(self.in_spin, set_in))
         form.addRow("끝", row(self.out_spin, set_out))
         form.addRow("속도", self.speed)
+        form.addRow("사진 움직임", self.motion)
         form.addRow("이 클립 소리", row(self.clip_vol, clip_vol_lbl, self.clip_mute))
         form.addRow(row(self.clip_info, None, reset))
         self.edit_box.setEnabled(False)
@@ -273,6 +289,8 @@ class ClipsPanel(QWidget):
             self.speed.addItem(f"{c.speed:g}배", float(c.speed))
             idx = self.speed.count() - 1
         self.speed.setCurrentIndex(idx)
+        self.motion.setEnabled(image)
+        self.motion.setCurrentIndex(max(0, self.motion.findData(c.motion)))
         self.clip_vol.setEnabled(c.has_audio and not image)
         self.clip_mute.setEnabled(c.has_audio and not image)
         self.clip_vol.setValue(int(round((c.volume if c.volume > 0 else 1.0) * 100)))
@@ -297,6 +315,7 @@ class ClipsPanel(QWidget):
         if not c:
             return
         c.speed = float(self.speed.currentData())
+        c.motion = self.motion.currentData()
         c.volume = 0.0 if self.clip_mute.isChecked() else self.clip_vol.value() / 100
         self.clip_vol.setEnabled(c.has_audio and not self.clip_mute.isChecked())
         self._label(self.list.currentItem())

@@ -86,6 +86,42 @@ def transition_filter(kind: str, w: int, h: int, fps: float) -> str:
     return ""
 
 
+MOTIONS = ("none", "auto", "zoom_in", "zoom_out", "pan_left", "pan_right")
+_AUTO_MOTIONS = ("zoom_in", "pan_right", "zoom_out", "pan_left")
+
+
+def resolve_motion(kind: str, index: int) -> str:
+    """'auto'는 조각 순서대로 확대 → 오른쪽 → 축소 → 왼쪽을 돌아가며 쓴다."""
+    if kind == "auto":
+        return _AUTO_MOTIONS[index % len(_AUTO_MOTIONS)]
+    return kind if kind in MOTIONS else "none"
+
+
+def motion_filter(kind: str, w: int, h: int, fps: float, frames: int, duration: float) -> str:
+    """사진 한 장을 천천히 확대·이동 (켄 번즈). 앞에 쉼표 포함, 없으면 빈 문자열.
+
+    사진을 3배로 한 번만 키워 둔 뒤 zoompan으로 프레임마다 잘라내서 움직임이 떨리지 않게 한다.
+    짧게 보이는 사진은 덜 움직여서 컷이 짧아도 어지럽지 않다.
+    """
+    if kind not in MOTIONS or kind in ("none", "auto"):
+        return ""
+    amount = min(0.15, 0.03 + 0.02 * duration)
+    last = max(1, frames - 1)
+    p = f"min(1,on/{last})"
+    center_x, center_y = "(iw-iw/zoom)/2", "(ih-ih/zoom)/2"
+    if kind == "zoom_in":
+        z, x, y = f"1+{amount:.4f}*{p}", center_x, center_y
+    elif kind == "zoom_out":
+        z, x, y = f"1+{amount:.4f}*(1-{p})", center_x, center_y
+    elif kind == "pan_right":
+        z, x, y = f"{1 + amount:.4f}", f"(iw-iw/zoom)*{p}", center_y
+    else:  # pan_left
+        z, x, y = f"{1 + amount:.4f}", f"(iw-iw/zoom)*(1-{p})", center_y
+    return (f",trim=end_frame=1,scale={w * 3}:{h * 3}:flags=bicubic,"
+            f"zoompan=z='{z}':x='{x}':y='{y}':d={frames}:s={w}x{h}:fps={_num(fps)},"
+            "setsar=1,setpts=PTS-STARTPTS")
+
+
 def atempo_chain(speed: float) -> str:
     """소리 속도 바꾸기 (음높이 유지). atempo는 한 번에 0.5~2배라서 여러 번 이어 붙인다."""
     if abs(speed - 1.0) < 1e-6:
@@ -107,9 +143,13 @@ def volume_filter(volume: float) -> str:
 
 
 def normalize_video_graph(w: int, h: int, fps: float, frames: int, duration: float,
-                          fit: str = "pad", transition: str = "none", speed: float = 1.0) -> str:
-    """[0:v] → [v] : 화면 맞추기 + (속도) + 프레임레이트 + 정확한 프레임 수 (+ 컷 전환 효과)."""
+                          fit: str = "pad", transition: str = "none", speed: float = 1.0,
+                          motion: str = "none") -> str:
+    """[0:v] → [v] : 화면 맞추기 + (속도·사진 움직임) + 프레임레이트 + 정확한 프레임 수 (+ 컷 전환 효과)."""
     speed_f = "" if abs(speed - 1.0) < 1e-6 else f"setpts=(PTS-STARTPTS)/{_num(speed)},"
+    motion_f = motion_filter(motion, w, h, fps, frames, duration)
+    if motion_f:
+        speed_f = motion_f[1:] + ","
     return (
         fit_graph("[0:v]", "[fit]", w, h, fit) + ";"
         f"[fit]{speed_f}fps={_num(fps)},format=yuv420p,"
@@ -120,14 +160,17 @@ def normalize_video_graph(w: int, h: int, fps: float, frames: int, duration: flo
     )
 
 
-def segment_args(seg: Segment, out_path: str, opt: RenderOptions, transition: str = "none") -> list[str]:
+def segment_args(seg: Segment, out_path: str, opt: RenderOptions, transition: str = "none",
+                 index: int = 0) -> list[str]:
     """1단계: 조각 하나를 규격화된 임시 파일(.mkv, H.264 + PCM)로."""
     frames = max(1, int(round(seg.duration * opt.fps)))
     dur = frames / opt.fps
     samples = int(round(dur * AUDIO_SR))
     args: list[str] = []
     speed = 1.0
+    motion = "none"
     if is_image(seg.path):
+        motion = resolve_motion(seg.motion, index)
         args += ["-loop", "1", "-framerate", _num(opt.fps), "-t", _num(dur + 0.5), "-i", seg.path]
         has_audio = False
     else:
@@ -140,7 +183,7 @@ def segment_args(seg: Segment, out_path: str, opt: RenderOptions, transition: st
         args += ["-f", "lavfi", "-i", f"anullsrc=r={AUDIO_SR}:cl=stereo"]
     a_in = "[0:a]" if has_audio else "[1:a]"
     graph = (
-        f"{normalize_video_graph(opt.width, opt.height, opt.fps, frames, dur, opt.fit, transition, speed)};"
+        f"{normalize_video_graph(opt.width, opt.height, opt.fps, frames, dur, opt.fit, transition, speed, motion)};"
         f"{a_in}{atempo_chain(speed) if has_audio else ''}"
         f"{volume_filter(seg.volume) if has_audio else ''}"
         f"aresample={AUDIO_SR},aformat=sample_fmts=s16:channel_layouts=stereo,"
@@ -589,7 +632,7 @@ class Renderer:
                 show()
 
             # 첫 조각은 '컷'이 아니므로 효과를 걸지 않는다
-            args = segment_args(seg, str(out), opt, transition if i > 0 else "none")
+            args = segment_args(seg, str(out), opt, transition if i > 0 else "none", i)
             key = cache.segment_key(args, str(out), [seg.path]) if self.use_cache else ""
             hit = cache.lookup(key) if key else None
             if hit is not None:

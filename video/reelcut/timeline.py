@@ -12,7 +12,7 @@ from .project import Clip, Project, Segment
 
 
 def concat_segments(clips: list[Clip]) -> list[Segment]:
-    return [Segment(c.path, c.in_point, c.timeline_length, c.has_audio, c.speed, c.volume)
+    return [Segment(c.path, c.in_point, c.timeline_length, c.has_audio, c.speed, c.volume, c.motion)
             for c in clips if c.length > 0.05]
 
 
@@ -87,7 +87,7 @@ def beat_sync_segments(clips: list[Clip], boundaries: list[float], order: str = 
     for s in _beat_sync_core(proxies, boundaries, order, seed):
         c = usable[int(s.path[1:])]
         out.append(Segment(c.path, c.in_point + s.src_start * c.speed, s.duration, c.has_audio,
-                           c.speed, c.volume))
+                           c.speed, c.volume, c.motion))
     return out
 
 
@@ -199,7 +199,7 @@ def per_clip_segments(clips: list[Clip], boundaries: list[float], order: str, se
         usable = usable[:]
         random.Random(seed).shuffle(usable)
     durations = [b - a for a, b in zip(boundaries, boundaries[1:])]
-    return [Segment(c.path, c.in_point, d, c.has_audio, c.speed, c.volume) for c, d in zip(usable, durations)]
+    return [Segment(c.path, c.in_point, d, c.has_audio, c.speed, c.volume, c.motion) for c, d in zip(usable, durations)]
 
 
 def build_segments(project: Project) -> list[Segment]:
