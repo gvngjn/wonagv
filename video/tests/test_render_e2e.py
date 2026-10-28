@@ -165,3 +165,24 @@ def test_thumbnail_png(media, tmp_path):
     data = thumbnail_png(str(media / "a.mp4"), 1.0, 96)
     assert data[:8] == b"\x89PNG\r\n\x1a\n"
     assert thumbnail_png(str(tmp_path / "없음.mp4")) == b""
+
+
+@needs_ffmpeg
+@pytest.mark.parametrize("transition", ["flash", "zoom", "dip"])
+def test_beat_transitions_keep_exact_length(media, tmp_path, transition):
+    """전환 효과가 있어도 영상·소리 길이가 정확해야 한다 (조각 경계 필터 재시작 버그 회귀 방지)."""
+    import subprocess
+
+    p = base_project(media)
+    m = probe(str(media / "music.wav"))
+    r = beats.analyze_file(m.path)
+    p.music = MusicSettings(m.path, m.duration, beats=r.beats, bpm=r.bpm)
+    p.beat_sync = BeatSyncSettings(enabled=True, beats_per_cut=2, transition=transition)
+    out = tmp_path / f"{transition}.mp4"
+    total = Renderer().render(p, str(out), preview=True)
+    lines = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=codec_type,start_time,duration",
+                            "-of", "csv=p=0", str(out)], capture_output=True, text=True).stdout.split()
+    for line in lines:
+        kind, start, dur = line.split(",")
+        assert float(start) == pytest.approx(0, abs=0.01), line
+        assert float(dur) == pytest.approx(total, abs=0.05), line

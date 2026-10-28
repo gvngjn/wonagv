@@ -84,6 +84,7 @@ class BeatSyncSettings:
     seed: int = 7
     use_music_length: bool = True  # 음악 길이만큼 만들기 (아니면 클립을 다 쓸 때까지)
     max_duration: float = 0.0      # 0이면 제한 없음
+    transition: str = "none"       # 컷 전환 효과: none | flash(번쩍) | zoom(줌 펀치) | dip(검은 깜빡)
 
 
 @dataclass

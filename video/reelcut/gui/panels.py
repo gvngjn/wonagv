@@ -422,6 +422,10 @@ class MusicPanel(QWidget):
         self.order.addItem("이어서 (예전 방식, 원본 흐름 그대로)", "continuous")
         self.shuffle_btn = QPushButton("다시 섞기")
         self.shuffle_btn.clicked.connect(self._reshuffle)
+        self.transition = QComboBox()
+        for label, key in (("효과 없음 (바로 바뀜)", "none"), ("번쩍 (흰 화면 플래시)", "flash"),
+                           ("줌 펀치 (살짝 확대됐다 돌아옴)", "zoom"), ("검은 깜빡임", "dip")):
+            self.transition.addItem(label, key)
         self.length_mode = QComboBox()
         self.length_mode.addItem("음악 길이만큼", True)
         self.length_mode.addItem("클립 길이만큼 (최대 음악 길이)", False)
@@ -433,6 +437,7 @@ class MusicPanel(QWidget):
         sf.addRow(self.sync_check)
         sf.addRow("화면 전환", self.per_cut)
         sf.addRow("클립 고르는 방식", row(self.order, self.shuffle_btn))
+        sf.addRow("컷 전환 효과", self.transition)
         sf.addRow("영상 길이", row(self.length_mode, QLabel("최대"), self.max_spin))
         sf.addRow(self.strip)
         sf.addRow(self.cut_info)
@@ -449,7 +454,7 @@ class MusicPanel(QWidget):
             w.valueChanged.connect(self._store)
         self.bpm_spin.valueChanged.connect(self._store)
         self.sync_check.toggled.connect(self._store)
-        for w in (self.per_cut, self.order, self.length_mode):
+        for w in (self.per_cut, self.order, self.length_mode, self.transition):
             w.currentIndexChanged.connect(self._store)
         self.reload()
 
@@ -467,6 +472,7 @@ class MusicPanel(QWidget):
         self.per_cut.setCurrentIndex(max(0, self.per_cut.findData(bs.beats_per_cut)))
         self.order.setCurrentIndex(max(0, self.order.findData("sequential" if bs.order == "spread" else bs.order)))
         self.length_mode.setCurrentIndex(0 if bs.use_music_length else 1)
+        self.transition.setCurrentIndex(max(0, self.transition.findData(bs.transition)))
         self.max_spin.setValue(bs.max_duration)
         self._loading = False
         self._refresh_info()
@@ -486,6 +492,7 @@ class MusicPanel(QWidget):
         bs.beats_per_cut = self.per_cut.currentData()
         bs.order = self.order.currentData()
         bs.use_music_length = bool(self.length_mode.currentData())
+        bs.transition = self.transition.currentData()
         bs.max_duration = self.max_spin.value()
         if bs.enabled and not was and ex.clip_volume >= 1.0:
             # 비트 맞춤 영상은 보통 음악만 들리게 한다

@@ -68,19 +68,37 @@ def fit_graph(src: str, out: str, w: int, h: int, fit: str) -> str:
             f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1{out}")
 
 
+TRANSITIONS = ("none", "flash", "zoom", "dip")
+
+
+def transition_filter(kind: str, w: int, h: int, fps: float) -> str:
+    """조각 시작 부분에 거는 컷 전환 효과 (앞에 쉼표 포함, 없으면 빈 문자열)."""
+    if kind == "flash":       # 흰 화면에서 0.15초 만에 돌아옴
+        return ",fade=t=in:st=0:d=0.15:color=white"
+    if kind == "dip":         # 검은 화면에서 0.12초 만에 돌아옴
+        return ",fade=t=in:st=0:d=0.12:color=black"
+    if kind == "zoom":        # 12% 확대된 채로 시작해서 0.3초 동안 원래 크기로
+        n = max(1, int(round(0.3 * fps)))
+        return (f",zoompan=z='1+0.12*max(0,1-on/{n})':d=1"
+                f":x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={w}x{h}:fps={_num(fps)}"
+                ",setpts=PTS-STARTPTS")
+    return ""
+
+
 def normalize_video_graph(w: int, h: int, fps: float, frames: int, duration: float,
-                          fit: str = "pad") -> str:
-    """[0:v] → [v] : 화면 맞추기 + 프레임레이트 + 정확한 프레임 수."""
+                          fit: str = "pad", transition: str = "none") -> str:
+    """[0:v] → [v] : 화면 맞추기 + 프레임레이트 + 정확한 프레임 수 (+ 컷 전환 효과)."""
     return (
         fit_graph("[0:v]", "[fit]", w, h, fit) + ";"
         f"[fit]fps={_num(fps)},format=yuv420p,"
         # 원본이 모자라면 마지막 장면을 늘려서라도 정확한 길이로 맞춘다
         f"tpad=stop_mode=clone:stop_duration={_num(duration + 1)},"
-        f"trim=end_frame={frames},setpts=PTS-STARTPTS[v]"
+        f"trim=end_frame={frames},setpts=PTS-STARTPTS"
+        f"{transition_filter(transition, w, h, fps)},format=yuv420p[v]"
     )
 
 
-def segment_args(seg: Segment, out_path: str, opt: RenderOptions) -> list[str]:
+def segment_args(seg: Segment, out_path: str, opt: RenderOptions, transition: str = "none") -> list[str]:
     """1단계: 조각 하나를 규격화된 임시 파일(.mkv, H.264 + PCM)로."""
     frames = max(1, int(round(seg.duration * opt.fps)))
     dur = frames / opt.fps
@@ -98,13 +116,15 @@ def segment_args(seg: Segment, out_path: str, opt: RenderOptions) -> list[str]:
         args += ["-f", "lavfi", "-i", f"anullsrc=r={AUDIO_SR}:cl=stereo"]
     a_in = "[0:a]" if has_audio else "[1:a]"
     graph = (
-        f"{normalize_video_graph(opt.width, opt.height, opt.fps, frames, dur, opt.fit)};"
+        f"{normalize_video_graph(opt.width, opt.height, opt.fps, frames, dur, opt.fit, transition)};"
         f"{a_in}aresample={AUDIO_SR},aformat=sample_fmts=s16:channel_layouts=stereo,"
         f"apad,atrim=end_sample={samples},asetpts=PTS-STARTPTS[a]"
     )
     args += [
         "-filter_complex", graph, "-map", "[v]", "-map", "[a]",
+        # 모든 조각을 똑같은 형식으로 (형식이 섞이면 이어붙일 때 색·시간이 꼬인다)
         "-c:v", "libx264", "-preset", "veryfast", "-crf", str(max(10, opt.crf - 4)),
+        "-pix_fmt", "yuv420p", "-color_range", "tv",
         "-c:a", "pcm_s16le", "-ar", str(AUDIO_SR),
         out_path,
     ]
@@ -263,12 +283,16 @@ def loudness_filter(target: float) -> str:
 def final_args(project: Project, concat_list: str, total: float, out_path: str,
                opt: RenderOptions, srt_name: str | None, fonts_dir: str | None = None) -> list[str]:
     """2단계 명령 인자. srt_name은 작업 폴더(cwd) 기준 상대 경로."""
-    args = ["-f", "concat", "-safe", "0", "-i", concat_list]
+    # 조각 경계에서 필터를 다시 시작하지 않게 (다시 시작하면 프레임 번호가 0으로 돌아가 시간이 꼬인다)
+    args = ["-reinit_filter", "0", "-f", "concat", "-safe", "0", "-i", concat_list]
     vf: list[str] = []
     af: list[str] = []
     mix: list[str] = ["[a0]"]
-    af.append(f"[0:a]volume={_num(project.export.clip_volume)}[a0]")
-    base = "[0:v]"
+    # 이어붙인 조각들의 시간 기록은 인코더의 프레임 배치에 따라 조금씩 밀릴 수 있어서,
+    # 프레임/샘플 번호로 시간을 다시 매긴다 (조각마다 프레임 수가 정확하므로 오차 없음)
+    af.append(f"[0:a]asettb=AVTB,asetpts=N/SR/TB,volume={_num(project.export.clip_volume)}[a0]")
+    vf.append(f"[0:v]settb=AVTB,setpts=N/({_num(opt.fps)}*TB)[v0]")
+    base = "[v0]"
     idx = 1
     for k, p in enumerate(project.pips):
         start, end = pip_window(p, total)
@@ -325,14 +349,16 @@ def final_args(project: Project, concat_list: str, total: float, out_path: str,
         vf.append(f"{base}subtitles={srt_name}:charenc=UTF-8{fonts_option(fonts_dir)}:force_style='{style}'[vsub]")
         base = "[vsub]"
     vf.append(f"{base}{fade_filters(project.export.fade_in, project.export.fade_out, total, 'v')}"
-              "format=yuv420p[vout]")
+              f"trim=duration={_num(total)},setpts=PTS-STARTPTS,format=yuv420p[vout]")
 
     if len(mix) > 1:
         af.append(f"{''.join(mix)}amix=inputs={len(mix)}:duration=first:normalize=0[amixed]")
     else:
         af.append("[a0]anull[amixed]")
     af.append(f"[amixed]{fade_filters(project.export.fade_in, project.export.fade_out, total, 'a')}"
-              f"{loudness_filter(project.export.loudness)}[aout]")
+              f"{loudness_filter(project.export.loudness)},"
+              # 길이를 필터에서 정확히 맞춘다 (출력 -t는 인코더 지연에 따라 소리 끝이 잘리는 경우가 있었음)
+              f"apad=whole_dur={_num(total)},atrim=duration={_num(total)},asetpts=PTS-STARTPTS[aout]")
 
     soft_subs = bool(srt_name) and not subs.burn_in
     if soft_subs:
@@ -345,7 +371,7 @@ def final_args(project: Project, concat_list: str, total: float, out_path: str,
         "-c:v", "libx264", "-preset", opt.preset, "-crf", str(opt.crf),
         "-r", _num(opt.fps), "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "192k", "-ar", str(AUDIO_SR),
-        "-t", _num(total), "-movflags", "+faststart",
+        "-movflags", "+faststart",
         out_path,
     ]
     return args
@@ -405,7 +431,8 @@ class Renderer:
         return r
 
     def _render_segments(self, segments: list[Segment], work: Path, opt: RenderOptions,
-                         total: float, report: Callable[[float, str], None]) -> list[str]:
+                         total: float, report: Callable[[float, str], None],
+                         transition: str = "none") -> list[str]:
         """1단계를 여러 개 동시에 실행 (조각이 많을수록 빨라짐)."""
         n = len(segments)
         progress = [0.0] * n
@@ -428,7 +455,8 @@ class Renderer:
                 show()
 
             try:
-                runner.run(segment_args(seg, str(out), opt), on_time)
+                # 첫 조각은 '컷'이 아니므로 효과를 걸지 않는다
+                runner.run(segment_args(seg, str(out), opt, transition if i > 0 else "none"), on_time)
             except FFmpegError as e:
                 raise FFmpegError(f"'{Path(seg.path).name}' 처리 중 문제가 생겼어요.\n{e}") from e
             with lock:
@@ -474,7 +502,9 @@ class Renderer:
         work = Path(tempfile.mkdtemp(prefix="reelcut_"))
         report = on_progress or (lambda f, m: None)
         try:
-            files = self._render_segments(segments, work, opt, total, report)
+            bs = project.beat_sync
+            transition = bs.transition if (bs.enabled and project.music.beats) else "none"
+            files = self._render_segments(segments, work, opt, total, report, transition)
             (work / "list.txt").write_text(concat_list_text(files), encoding="utf-8")
 
             srt_name = None

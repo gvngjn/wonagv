@@ -152,3 +152,22 @@ def test_fade_filters():
     assert fade_filters(1, 2, 10, "v") == "fade=t=in:st=0:d=1,fade=t=out:st=8:d=2,"
     assert fade_filters(0, 1, 10, "a") == "afade=t=out:st=9:d=1,"
     assert fade_filters(5, 5, 4, "v") == "fade=t=in:st=0:d=2,fade=t=out:st=2:d=2,"   # 영상보다 길면 절반으로
+
+
+def test_transition_filters():
+    from reelcut.render import transition_filter
+
+    assert transition_filter("none", 1080, 1920, 30) == ""
+    assert "color=white" in transition_filter("flash", 1080, 1920, 30)
+    assert "color=black" in transition_filter("dip", 1080, 1920, 30)
+    z = transition_filter("zoom", 1080, 1920, 30)
+    assert "zoompan" in z and "s=1080x1920" in z and "on/9" in z
+    args = segment_args(Segment("v.mp4", 0, 1.0), "o.mkv", RenderOptions(320, 180, 30), "flash")
+    assert "color=white" in args[args.index("-filter_complex") + 1]
+
+
+def test_segments_always_same_pixel_format():
+    for tr in ("none", "flash", "zoom", "dip"):
+        args = segment_args(Segment("v.mp4", 0, 1.0), "o.mkv", RenderOptions(320, 180, 30), tr)
+        assert args[args.index("-pix_fmt") + 1] == "yuv420p"
+        assert args[args.index("-filter_complex") + 1].count("format=yuv420p[v]") == 1
