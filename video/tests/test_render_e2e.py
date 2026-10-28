@@ -156,3 +156,12 @@ def test_missing_file_is_reported_before_rendering(media, tmp_path):
     with pytest.raises(MissingFilesError) as e:
         Renderer().render(p, str(tmp_path / "o.mp4"))
     assert "사라진 영상.mp4" in str(e.value) and "없는 노래.mp3" in str(e.value)
+
+
+@needs_ffmpeg
+def test_thumbnail_png(media, tmp_path):
+    from reelcut.ffmpeg import thumbnail_png
+
+    data = thumbnail_png(str(media / "a.mp4"), 1.0, 96)
+    assert data[:8] == b"\x89PNG\r\n\x1a\n"
+    assert thumbnail_png(str(tmp_path / "없음.mp4")) == b""

@@ -231,3 +231,17 @@ class ProcessRunner:
             detail = "".join(stderr_lines[-25:])
             hint = friendly_message(detail)
             raise FFmpegError((hint + "\n\n[자세한 내용]\n" if hint else "ffmpeg 실행 실패:\n") + detail)
+
+
+def thumbnail_png(path: str, at: float = 0.0, width: int = 160) -> bytes:
+    """영상의 at초 장면을 PNG로 (실패하면 빈 bytes)."""
+    cmd = [ffmpeg_path(), "-v", "error", "-nostdin"]
+    if at > 0:
+        cmd += ["-ss", f"{at:.3f}"]
+    cmd += ["-i", str(path), "-frames:v", "1", "-vf", f"scale={width}:-2",
+            "-f", "image2pipe", "-vcodec", "png", "-"]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, timeout=20, creationflags=_NO_WINDOW)
+    except (subprocess.TimeoutExpired, OSError):
+        return b""
+    return proc.stdout if proc.returncode == 0 else b""

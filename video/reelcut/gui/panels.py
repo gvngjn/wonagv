@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtGui import QColor, QIcon, QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFontComboBox,
     QFormLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QListWidgetItem,
@@ -17,6 +17,7 @@ from ..ffmpeg import probe
 from ..project import Clip, PipOverlay, Project, SubtitleEntry
 from ..render import is_image
 from .music_gauge import MusicGauge, MusicPreviewPlayer
+from .thumbnails import THUMB_H, THUMB_W, ThumbnailLoader
 from .subtitle_style import ColorButton, SubtitleSample, font_file_families, register_font_file
 
 VIDEO_FILTER = "영상·사진 (*.mp4 *.mov *.mkv *.avi *.webm *.m4v *.wmv *.jpg *.jpeg *.png *.bmp *.webp);;모든 파일 (*)"
@@ -85,7 +86,11 @@ class ClipsPanel(QWidget):
         self._player_position = player_position   # () -> 현재 미리보기 재생 위치(초)
         self._loading = False
 
+        self.thumbs = ThumbnailLoader(self)
+        self.thumbs.ready.connect(self._on_thumb)
         self.list = QListWidget()
+        self.list.setIconSize(QSize(THUMB_W, THUMB_H))
+        self.list.setSpacing(1)
         self.list.setDragDropMode(QAbstractItemView.InternalMove)
         self.list.setSelectionMode(QAbstractItemView.SingleSelection)
         self.list.model().rowsMoved.connect(self._sync_order)
@@ -160,6 +165,22 @@ class ClipsPanel(QWidget):
         kind = "🖼" if is_image(c.path) else ("🎬" if c.has_audio else "🎬🔇")
         trimmed = " ✂" if (c.in_point > 0 or (c.out_point > 0 and c.duration and c.out_point < c.duration)) else ""
         item.setText(f"{kind} {c.name}   {fmt_time(c.length)}{trimmed}")
+        at = self._thumb_time(c)
+        item.setData(Qt.UserRole + 1, ThumbnailLoader.key(c.path, at))
+        pm = self.thumbs.get(c.path, at)
+        if pm is not None:
+            item.setIcon(QIcon(pm))
+
+    @staticmethod
+    def _thumb_time(c: Clip) -> float:
+        # 첫 프레임은 검은 화면인 경우가 많아서 조금 뒤 장면을 쓴다
+        return 0.0 if is_image(c.path) else round(c.in_point + min(1.0, c.length / 3), 1)
+
+    def _on_thumb(self, key: str, pm) -> None:
+        for i in range(self.list.count()):
+            item = self.list.item(i)
+            if item.data(Qt.UserRole + 1) == key:
+                item.setIcon(QIcon(pm))
 
     def add_files(self, paths: list[str]) -> None:
         errors = []
