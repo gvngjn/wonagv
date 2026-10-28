@@ -43,6 +43,38 @@ def cut_boundaries(beats: list[float], music_start: float, beats_per_cut: int,
     return [f / fps for f in frames]
 
 
+def pick_cut_beats(beats: list[float], every: int, mode: str = "regular",
+                   strengths: list[float] | None = None, energy: list[float] | None = None) -> list[float]:
+    """컷을 넣을 비트를 고른다.
+
+    regular: every 비트마다
+    accent:  every 비트가 지난 뒤 처음 오는 센 비트(주변 최댓값의 70% 이상)에서 컷. 센 비트가 없으면 every의 2배에서 컷
+    energy:  신나는 구간(음량 상위 35%)은 2배 자주, 조용한 구간(하위 25%)은 2배 드물게
+    """
+    every = max(1, int(every))
+    n = len(beats)
+    if mode == "accent" and strengths and len(strengths) == n:
+        # 일정하게보다 자주 바꾸지 않는다: every 비트가 지난 뒤 처음 오는 센 비트에서 컷
+        min_gap, max_gap = every, every * 2
+        thresh = 0.7
+        out, last = [], -10 ** 9
+        for i, t in enumerate(beats):
+            gap = i - last
+            if (strengths[i] >= thresh and gap >= min_gap) or gap >= max_gap:
+                out.append(t)
+                last = i
+        return out
+    if mode == "energy" and energy and len(energy) == n:
+        out, i = [], 0
+        while i < n:
+            out.append(beats[i])
+            e = energy[i]
+            step = max(1, every // 2) if e >= 0.65 else (every * 2 if e <= 0.25 else every)
+            i += step
+        return out
+    return beats[::every]
+
+
 def beat_sync_segments(clips: list[Clip], boundaries: list[float], order: str = "sequential",
                        seed: int = 7) -> list[Segment]:
     """클립 속도를 반영해서 컷을 고른다.
@@ -170,7 +202,13 @@ def build_segments(project: Project) -> list[Segment]:
     if bs.max_duration > 0:
         end_time = min(end_time, bs.max_duration)
     beats = [b + music.beat_offset for b in music.beats]
-    bounds = cut_boundaries(beats, music.start, bs.beats_per_cut, end_time, project.export.fps)
+    # 음악 시작 위치 이후의 비트만 골라서 컷 위치 선택
+    keep = [i for i, b in enumerate(beats) if b - music.start > -1e-3]
+    sel = [beats[i] for i in keep]
+    strengths = [music.beat_strengths[i] for i in keep] if len(music.beat_strengths) == len(beats) else None
+    energy = [music.beat_energy[i] for i in keep] if len(music.beat_energy) == len(beats) else None
+    picked = pick_cut_beats(sel, bs.beats_per_cut, bs.cut_mode, strengths, energy)
+    bounds = cut_boundaries(picked, music.start, 1, end_time, project.export.fps)
     return beat_sync_segments(clips, bounds, bs.order, bs.seed)
 
 

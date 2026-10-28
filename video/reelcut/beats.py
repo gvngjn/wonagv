@@ -6,7 +6,7 @@
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -23,6 +23,8 @@ class BeatResult:
     bpm: float
     beats: list[float]      # 초 단위 비트 위치
     duration: float
+    strengths: list[float] = field(default_factory=list)   # 비트마다 세기 (0~1, 킥·스네어가 크면 1에 가까움)
+    energy: list[float] = field(default_factory=list)      # 비트 구간마다 음량 (0~1, 후렴처럼 신나는 부분이 큼)
 
 
 def onset_envelope(y: np.ndarray, sr: int = SAMPLE_RATE) -> np.ndarray:
@@ -190,7 +192,39 @@ def analyze_samples(y: np.ndarray, sr: int = SAMPLE_RATE, bpm_hint: float = 0.0)
         slope = float(np.polyfit(np.arange(len(beats)), beats, 1)[0])
         if slope > 0:
             bpm = 60.0 / slope
-    return BeatResult(bpm=round(bpm, 1), beats=beats, duration=duration)
+    strengths, energy = beat_features(y, sr, env, frames)
+    return BeatResult(bpm=round(bpm, 1), beats=beats, duration=duration,
+                      strengths=strengths, energy=energy)
+
+
+def _rank01(values: np.ndarray) -> list[float]:
+    """값을 0~1 순위로 (곡마다 음량이 달라도 같은 기준이 되게)."""
+    if len(values) == 0:
+        return []
+    order = values.argsort().argsort()
+    return [round(float(v), 3) for v in order / max(1, len(values) - 1)]
+
+
+def beat_features(y: np.ndarray, sr: int, env: np.ndarray, frames: np.ndarray) -> tuple[list[float], list[float]]:
+    """비트 세기(그 순간 onset 크기)와 비트 구간 음량(RMS)."""
+    if len(frames) == 0:
+        return [], []
+    # 세기: 비트 직후 60ms 동안의 실제 음량 (onset 곡선은 로그로 눌려 있어 강약 차이가 작게 나옴)
+    win = int(0.06 * sr)
+    starts = (np.asarray(frames) * HOP).astype(int)
+    raw = np.array([np.sqrt(np.mean(y[a:a + win] ** 2)) if a < len(y) else 0.0 for a in starts])
+    # 세기는 '주변 8비트 안에서 가장 센 비트' 대비 비율 → 후렴처럼 전체가 큰 구간에서도 강박만 1에 가깝다
+    w = 8
+    local_max = np.array([raw[max(0, i - w): i + w + 1].max() for i in range(len(raw))])
+    strength = np.where(local_max > 0, raw / np.maximum(local_max, 1e-9), 0.0)
+    samples = (np.asarray(frames) * HOP).astype(int)
+    bounds = list(samples) + [len(y)]
+    rms = np.array([np.sqrt(np.mean(y[a:b] ** 2)) if b > a else 0.0 for a, b in zip(bounds, bounds[1:])])
+    # 음량은 한두 비트짜리 튐을 줄이려고 앞뒤 4비트 평균
+    if len(rms) >= 3:
+        k = np.ones(min(9, len(rms))) / min(9, len(rms))
+        rms = np.convolve(rms, k, mode="same")
+    return [round(float(v), 3) for v in strength], _rank01(rms)
 
 
 def analyze_file(path: str, bpm_hint: float = 0.0) -> BeatResult:

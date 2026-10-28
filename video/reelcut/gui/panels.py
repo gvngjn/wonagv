@@ -463,6 +463,10 @@ class MusicPanel(QWidget):
         self.order.addItem("이어서 (예전 방식, 원본 흐름 그대로)", "continuous")
         self.shuffle_btn = QPushButton("다시 섞기")
         self.shuffle_btn.clicked.connect(self._reshuffle)
+        self.cut_mode = QComboBox()
+        self.cut_mode.addItem("일정하게 (정해진 비트마다)", "regular")
+        self.cut_mode.addItem("센 비트에서만 (킥·스네어 강한 곳)", "accent")
+        self.cut_mode.addItem("신나는 부분은 빠르게, 조용한 부분은 느리게", "energy")
         self.transition = QComboBox()
         for label, key in (("효과 없음 (바로 바뀜)", "none"), ("번쩍 (흰 화면 플래시)", "flash"),
                            ("줌 펀치 (살짝 확대됐다 돌아옴)", "zoom"), ("검은 깜빡임", "dip")):
@@ -477,6 +481,7 @@ class MusicPanel(QWidget):
         sf = QFormLayout(sync_box)
         sf.addRow(self.sync_check)
         sf.addRow("화면 전환", self.per_cut)
+        sf.addRow("컷 리듬", self.cut_mode)
         sf.addRow("클립 고르는 방식", row(self.order, self.shuffle_btn))
         sf.addRow("컷 전환 효과", self.transition)
         sf.addRow("영상 길이", row(self.length_mode, QLabel("최대"), self.max_spin))
@@ -495,7 +500,7 @@ class MusicPanel(QWidget):
             w.valueChanged.connect(self._store)
         self.bpm_spin.valueChanged.connect(self._store)
         self.sync_check.toggled.connect(self._store)
-        for w in (self.per_cut, self.order, self.length_mode, self.transition):
+        for w in (self.per_cut, self.order, self.length_mode, self.transition, self.cut_mode):
             w.currentIndexChanged.connect(self._store)
         self.reload()
 
@@ -514,6 +519,7 @@ class MusicPanel(QWidget):
         self.order.setCurrentIndex(max(0, self.order.findData("sequential" if bs.order == "spread" else bs.order)))
         self.length_mode.setCurrentIndex(0 if bs.use_music_length else 1)
         self.transition.setCurrentIndex(max(0, self.transition.findData(bs.transition)))
+        self.cut_mode.setCurrentIndex(max(0, self.cut_mode.findData(bs.cut_mode)))
         self.max_spin.setValue(bs.max_duration)
         self._loading = False
         self._refresh_info()
@@ -534,6 +540,7 @@ class MusicPanel(QWidget):
         bs.order = self.order.currentData()
         bs.use_music_length = bool(self.length_mode.currentData())
         bs.transition = self.transition.currentData()
+        bs.cut_mode = self.cut_mode.currentData()
         bs.max_duration = self.max_spin.value()
         if bs.enabled and not was and ex.clip_volume >= 1.0:
             # 비트 맞춤 영상은 보통 음악만 들리게 한다
@@ -574,7 +581,10 @@ class MusicPanel(QWidget):
             elif not self.project.clips:
                 self.cut_info.setText("클립 탭에서 영상을 추가해 주세요.")
             else:
-                self.cut_info.setText(f"컷 {len(segs)}개 · 완성 길이 {fmt_time(length)}")
+                note = ""
+                if self.project.beat_sync.cut_mode != "regular" and len(m.beat_strengths) != len(m.beats):
+                    note = " · 컷 리듬을 쓰려면 '비트 분석'을 다시 눌러 주세요"
+                self.cut_info.setText(f"컷 {len(segs)}개 · 완성 길이 {fmt_time(length)}{note}")
         else:
             self.cut_info.setText("꺼져 있으면 음악은 배경음으로만 깔려요.")
 
@@ -640,9 +650,13 @@ class MusicPanel(QWidget):
         self.reload()
         self.changed.emit()
 
-    def set_beats(self, bpm: float, beats: list[float]) -> None:
-        self.project.music.bpm = bpm
-        self.project.music.beats = beats
+    def set_beats(self, bpm: float, beats: list[float], strengths: list[float] | None = None,
+                  energy: list[float] | None = None) -> None:
+        m = self.project.music
+        m.bpm = bpm
+        m.beats = beats
+        m.beat_strengths = list(strengths or [])
+        m.beat_energy = list(energy or [])
         self.reload()
         self.changed.emit()
 
@@ -664,11 +678,19 @@ class MusicPanel(QWidget):
             return
         if factor == 0.5 and len(m.beats) >= 2:
             # 하나 걸러 하나만 남기기
-            self.set_beats(round(m.bpm / 2, 1), m.beats[::2])
+            self.set_beats(round(m.bpm / 2, 1), m.beats[::2], m.beat_strengths[::2], m.beat_energy[::2])
         elif factor == 2.0 and len(m.beats) >= 2:
             mids = [(a + b) / 2 for a, b in zip(m.beats, m.beats[1:])]
             merged = sorted(m.beats + mids)
-            self.set_beats(round(m.bpm * 2, 1), merged)
+            strengths, energy = [], []
+            if len(m.beat_strengths) == len(m.beats) and len(m.beat_energy) == len(m.beats):
+                for i in range(len(m.beats)):
+                    strengths.append(m.beat_strengths[i])
+                    energy.append(m.beat_energy[i])
+                    if i < len(mids):
+                        strengths.append(0.0)              # 사이에 끼운 비트는 약한 비트
+                        energy.append(m.beat_energy[i])
+            self.set_beats(round(m.bpm * 2, 1), merged, strengths, energy)
 
     def _reshuffle(self) -> None:
         self.project.beat_sync.seed += 1

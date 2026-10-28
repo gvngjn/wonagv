@@ -485,7 +485,7 @@ class MainWindow(QMainWindow):
             if self.project.music.path != path:
                 return
             self.music.set_waveform(peaks)
-            self.music.set_beats(beats.bpm, beats.beats)
+            self.music.set_beats(beats.bpm, beats.beats, beats.strengths, beats.energy)
             self.progress.setValue(1000)
             self.status.setText(f"비트 분석 완료: 약 {beats.bpm:.1f} BPM, 비트 {len(beats.beats)}개 · "
                                 "파형에서 클릭·드래그로 시작 위치를 고르세요.")

@@ -83,6 +83,8 @@ class MusicSettings:
     bpm: float = 0.0               # 분석 결과 또는 직접 입력
     beat_offset: float = 0.0       # 비트 위치 미세 조정(초, +면 늦게)
     beats: list[float] = field(default_factory=list)
+    beat_strengths: list[float] = field(default_factory=list)   # 비트마다 세기 0~1
+    beat_energy: list[float] = field(default_factory=list)      # 비트 구간 음량 0~1
 
 
 @dataclass
@@ -93,6 +95,7 @@ class BeatSyncSettings:
     seed: int = 7
     use_music_length: bool = True  # 음악 길이만큼 만들기 (아니면 클립을 다 쓸 때까지)
     max_duration: float = 0.0      # 0이면 제한 없음
+    cut_mode: str = "regular"      # regular(일정하게) | accent(센 비트에서) | energy(신나는 부분은 빠르게)
     transition: str = "none"       # 컷 전환 효과: none | flash(번쩍) | zoom(줌 펀치) | dip(검은 깜빡)
 
 
