@@ -301,6 +301,12 @@ class MainWindow(QMainWindow):
             a.triggered.connect(fn)
             m.addAction(a)
         m.addSeparator()
+        save_tpl = QAction("지금 설정을 템플릿으로 저장…", self)
+        save_tpl.triggered.connect(self.save_template)
+        m.addAction(save_tpl)
+        self.template_menu = m.addMenu("템플릿 적용")
+        self.template_menu.aboutToShow.connect(self._fill_template_menu)
+        m.addSeparator()
         clear_cache = QAction("임시 조각 지우기…", self)
         clear_cache.triggered.connect(self.clear_cache)
         m.addAction(clear_cache)
@@ -939,6 +945,63 @@ class MainWindow(QMainWindow):
             self.music.set_waveform([])
             self._reload_all()
             self._reset_history()
+
+    def save_template(self) -> None:
+        """컷·자막 모양·제목 모양·색감·내보내기 설정을 다음 여행에 그대로 쓰도록 저장."""
+        from PySide6.QtWidgets import QInputDialog
+
+        from .. import templates
+
+        name, ok = QInputDialog.getText(self, "템플릿으로 저장",
+                                        "템플릿 이름 (예: 여행 릴스):\n클립·자막 내용·제목 내용은 빼고 설정만 저장해요.",
+                                        text="여행 릴스")
+        if not ok or not name.strip():
+            return
+        include_music = False
+        if self.project.music.path:
+            include_music = QMessageBox.question(
+                self, "템플릿으로 저장", f"음악({Path(self.project.music.path).name})도 템플릿에 넣을까요?\n"
+                "같은 노래로 시리즈를 만들 때 편해요.") == QMessageBox.Yes
+        path = templates.save_template(name.strip(), self.project, include_music)
+        self.status.setText(f"템플릿 저장: {path.stem} — 파일 메뉴 > 템플릿 적용에서 쓸 수 있어요.")
+
+    def _fill_template_menu(self) -> None:
+        from .. import templates
+
+        self.template_menu.clear()
+        items = templates.list_templates()
+        if not items:
+            a = self.template_menu.addAction("(저장된 템플릿 없음)")
+            a.setEnabled(False)
+        for name, path in items:
+            a = self.template_menu.addAction(name)
+            a.triggered.connect(lambda _=False, p=path: self.apply_template(p))
+        self.template_menu.addSeparator()
+        folder = self.template_menu.addAction("템플릿 폴더 열기")
+        folder.triggered.connect(self._open_templates_folder)
+
+    @staticmethod
+    def _open_templates_folder() -> None:
+        from .. import templates
+
+        templates.templates_dir().mkdir(parents=True, exist_ok=True)
+        open_external(str(templates.templates_dir()))
+
+    def apply_template(self, path) -> None:
+        from .. import templates
+
+        try:
+            data = templates.load_template(path)
+        except Exception as e:  # noqa: BLE001
+            QMessageBox.warning(self, "ReelCut", f"템플릿을 읽을 수 없어요:\n{e}")
+            return
+        self.music.stop_preview()
+        self.project = templates.apply_template(self.project, data)
+        self._reload_all()
+        self._on_changed()
+        if templates.has_music(data):
+            self.load_music_waveform()
+        self.status.setText(f"템플릿 적용: {Path(path).stem} (클립·자막 내용은 그대로예요)")
 
     def open_project(self) -> None:
         if not self._confirm_discard():
