@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import time
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, QUrl
@@ -15,7 +16,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
-from .. import __version__
+from .. import __version__, autosave
 from ..project import ASPECTS, Project, find_aspect
 from .audio_devices import AudioDeviceManager, AudioOutputPicker
 from .panels import ClipsPanel, MusicPanel, PipPanel, SubtitlePanel, fmt_time
@@ -165,6 +166,11 @@ class MainWindow(QMainWindow):
         self._build_menu()
         self._load_export_settings()
         self._update_title()
+        # 자동 저장: 마지막 변경 3초 뒤에 따로 저장
+        self._autosave_timer = QTimer(self)
+        self._autosave_timer.setSingleShot(True)
+        self._autosave_timer.setInterval(3000)
+        self._autosave_timer.timeout.connect(self._do_autosave)
 
     # ---------------------------------------------------------------- UI 구성
     def _build_menu(self) -> None:
@@ -306,6 +312,7 @@ class MainWindow(QMainWindow):
     def _on_changed(self) -> None:
         self.dirty = True
         self._update_title()
+        self._autosave_timer.start()
         if self.sender() is not self.music:
             self.music.reload()   # 클립·fps가 바뀌면 컷 정보도 갱신
 
@@ -517,6 +524,37 @@ class MainWindow(QMainWindow):
         else:
             subprocess.Popen(["xdg-open", str(Path(path).parent)])
 
+    # ---------------------------------------------------------------- 자동 저장 / 복구
+    def _do_autosave(self) -> None:
+        if not self.dirty:
+            return
+        try:
+            autosave.write(self.project, self.project_path)
+        except OSError:
+            pass          # 자동 저장 실패는 작업을 막지 않는다
+
+    def check_recovery(self) -> None:
+        """앱 시작 시: 지난번에 저장하지 않고 꺼진 작업이 있으면 복구할지 묻는다."""
+        rec = autosave.read()
+        if rec is None:
+            return
+        when = time.strftime("%m월 %d일 %H:%M", time.localtime(rec.saved_at)) if rec.saved_at else "이전"
+        name = Path(rec.original_path).name if rec.original_path else "새 프로젝트"
+        r = QMessageBox.question(
+            self, "작업 복구",
+            f"저장하지 않고 꺼진 작업이 있어요.\n\n{name} · {when} · 클립 {len(rec.project.clips)}개\n\n복구할까요?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+        if r != QMessageBox.Yes:
+            autosave.clear()
+            return
+        self.project = rec.project
+        self.project_path = rec.original_path
+        self._reload_all()
+        self.dirty = True
+        self._update_title()
+        self.load_music_waveform()
+        self.status.setText("작업을 복구했어요. 저장(Ctrl+S)하면 복구 기록이 정리돼요.")
+
     # ---------------------------------------------------------------- 프로젝트 파일
     def _confirm_discard(self) -> bool:
         if not self.dirty:
@@ -530,6 +568,7 @@ class MainWindow(QMainWindow):
     def new_project(self) -> None:
         if self._confirm_discard():
             self.music.stop_preview()
+            autosave.clear()
             self.project = Project()
             self.project_path = None
             self.dirty = False
@@ -549,6 +588,7 @@ class MainWindow(QMainWindow):
             return
         self.project_path = path
         self.dirty = False
+        autosave.clear()
         self.music.stop_preview()
         self.music.set_waveform([])
         self._reload_all()
@@ -564,9 +604,15 @@ class MainWindow(QMainWindow):
                                                   "ReelCut 프로젝트 (*.reelcut.json)")
             if not path:
                 return False
-        self.project.save(path)
+        try:
+            self.project.save(path)
+        except OSError as e:
+            QMessageBox.warning(self, "ReelCut", f"저장하지 못했어요:\n{e}")
+            return False
         self.project_path = path
         self.dirty = False
+        self._autosave_timer.stop()
+        autosave.clear()
         self._update_title()
         self.status.setText(f"저장했어요: {path}")
         return True
@@ -618,4 +664,6 @@ class MainWindow(QMainWindow):
             self.task.wait(3000)
         self.preview.unload()
         self.music.stop_preview()
+        self._autosave_timer.stop()
+        autosave.clear()       # 저장했거나 '저장 안 함'을 고른 정상 종료
         e.accept()

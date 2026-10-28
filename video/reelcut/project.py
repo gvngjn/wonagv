@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
@@ -111,6 +112,18 @@ class SubtitleSettings:
     source: str = "video"          # video | music
 
 
+def atomic_write_text(path: str | Path, text: str) -> None:
+    """임시 파일에 다 쓴 뒤 바꿔치기 → 저장 도중 꺼져도 기존 파일이 깨지지 않는다."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(text)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+
+
 # 화면 비율 프리셋: 키 → (이름, {화질: (너비, 높이)})
 ASPECTS = {
     "16:9": ("유튜브 · 가로 (16:9)", {"720p": (1280, 720), "1080p": (1920, 1080), "4K": (3840, 2160)}),
@@ -155,7 +168,7 @@ class Project:
         return asdict(self)
 
     def save(self, path: str | Path) -> None:
-        Path(path).write_text(json.dumps(self.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+        atomic_write_text(path, json.dumps(self.to_dict(), ensure_ascii=False, indent=2))
 
     @classmethod
     def from_dict(cls, d: dict) -> "Project":

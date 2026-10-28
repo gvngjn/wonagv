@@ -21,4 +21,6 @@ def main() -> int:
         return 1
     w = MainWindow()
     w.show()
+    from PySide6.QtCore import QTimer
+    QTimer.singleShot(0, w.check_recovery)
     return app.exec()
