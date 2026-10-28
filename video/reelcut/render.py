@@ -239,6 +239,14 @@ def windows_fonts_option() -> str:
     return f":fontsdir='{escaped}'"
 
 
+def loudness_filter(target: float) -> str:
+    """음량 자동 맞춤 (EBU R128). target=0이면 그대로 통과."""
+    if not target:
+        return "anull"
+    # loudnorm은 내부적으로 샘플레이트를 바꾸므로 다시 48kHz로
+    return f"loudnorm=I={_num(target)}:TP=-1.5:LRA=11,aresample={AUDIO_SR}"
+
+
 def final_args(project: Project, concat_list: str, total: float, out_path: str,
                opt: RenderOptions, srt_name: str | None, fonts_dir: str | None = None) -> list[str]:
     """2단계 명령 인자. srt_name은 작업 폴더(cwd) 기준 상대 경로."""
@@ -306,9 +314,10 @@ def final_args(project: Project, concat_list: str, total: float, out_path: str,
     vf.append(f"{base}format=yuv420p[vout]")
 
     if len(mix) > 1:
-        af.append(f"{''.join(mix)}amix=inputs={len(mix)}:duration=first:normalize=0[aout]")
+        af.append(f"{''.join(mix)}amix=inputs={len(mix)}:duration=first:normalize=0[amixed]")
     else:
-        af.append("[a0]anull[aout]")
+        af.append("[a0]anull[amixed]")
+    af.append(f"[amixed]{loudness_filter(project.export.loudness)}[aout]")
 
     soft_subs = bool(srt_name) and not subs.burn_in
     if soft_subs:

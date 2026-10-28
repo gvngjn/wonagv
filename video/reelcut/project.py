@@ -151,6 +151,7 @@ class ExportSettings:
     preset: str = "medium"
     clip_volume: float = 1.0       # 원본 영상 소리 크기
     fit: str = "blur"              # 비율이 다른 영상: blur(흐린 배경) | crop(잘라서 채우기) | pad(검은 여백)
+    loudness: float = -14.0        # 음량 자동 맞춤 목표(LUFS). 0이면 끔. -14 = 유튜브·릴스 권장
     output: str = ""
 
 

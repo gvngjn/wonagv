@@ -11,7 +11,7 @@ from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
-    QButtonGroup, QComboBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QMainWindow,
+    QButtonGroup, QCheckBox, QComboBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QMainWindow,
     QMessageBox, QProgressBar, QPushButton, QScrollArea, QSlider, QSplitter, QStyle, QTabWidget,
     QVBoxLayout, QWidget,
 )
@@ -233,6 +233,9 @@ class MainWindow(QMainWindow):
             self.quality.addItem(label, crf)
         for w in (self.size, self.fit, self.fps, self.quality):
             w.currentIndexChanged.connect(self._store_export)
+        self.loud = QCheckBox("음량 자동 맞춤 (유튜브·릴스 권장 크기)")
+        self.loud.setToolTip("노래와 원본 소리를 합친 최종 음량을 -14 LUFS로 맞춰요. 너무 작거나 커서 깨지는 걸 막아요.")
+        self.loud.toggled.connect(self._store_export)
 
         self.preview_btn = QPushButton("▶ 미리보기 만들기")
         self.preview_btn.setToolTip("작은 화질로 빠르게 만들어서 오른쪽 위에서 재생해요")
@@ -259,6 +262,7 @@ class MainWindow(QMainWindow):
         sl.addWidget(self.quality, 1)
         f.addRow("해상도·화질", settings)
         f.addRow("비율이 다른 영상", row_widget(self.fit, self.size_label))
+        f.addRow("소리", self.loud)
         buttons = QWidget()
         bl = QHBoxLayout(buttons)
         bl.setContentsMargins(0, 0, 0, 0)
@@ -273,7 +277,7 @@ class MainWindow(QMainWindow):
 
     def _load_export_settings(self) -> None:
         ex = self.project.export
-        widgets = (self.size, self.fit, self.fps, self.quality)
+        widgets = (self.size, self.fit, self.fps, self.quality, self.loud)
         for w in widgets:
             w.blockSignals(True)
         found = find_aspect(ex.width, ex.height)
@@ -285,6 +289,7 @@ class MainWindow(QMainWindow):
         self.aspect_group.setExclusive(True)
         self.size.setCurrentIndex(max(0, self.size.findData(size)))
         self.fit.setCurrentIndex(max(0, self.fit.findData(ex.fit)))
+        self.loud.setChecked(bool(ex.loudness))
         self.fps.setCurrentIndex(max(0, self.fps.findData(ex.fps)))
         qi = self.quality.findData(ex.crf)
         self.quality.setCurrentIndex(qi if qi >= 0 else 1)
@@ -298,6 +303,7 @@ class MainWindow(QMainWindow):
         if checked is not None:
             ex.width, ex.height = ASPECTS[checked.property("aspect")][1][self.size.currentData()]
         ex.fit = self.fit.currentData()
+        ex.loudness = -14.0 if self.loud.isChecked() else 0.0
         ex.fps = self.fps.currentData()
         ex.crf = self.quality.currentData()
         self._update_size_label()

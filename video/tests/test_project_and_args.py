@@ -134,3 +134,12 @@ def test_friendly_ffmpeg_messages():
     assert "디스크 공간" in friendly_message("av_interleaved_write_frame(): No space left on device")
     assert "다른 프로그램" in friendly_message("out.mp4: Permission denied")
     assert friendly_message("something odd") == ""
+
+
+def test_loudness_filter_in_final_args():
+    p = Project()
+    args = final_args(p, "list.txt", 5.0, "o.mp4", RenderOptions(640, 360, 30), None)
+    assert "loudnorm=I=-14" in args[args.index("-filter_complex") + 1]
+    p.export.loudness = 0
+    args = final_args(p, "list.txt", 5.0, "o.mp4", RenderOptions(640, 360, 30), None)
+    assert "loudnorm" not in args[args.index("-filter_complex") + 1]
