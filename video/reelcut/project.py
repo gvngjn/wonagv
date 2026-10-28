@@ -200,6 +200,7 @@ class ExportSettings:
     loudness: float = -14.0        # 음량 자동 맞춤 목표(LUFS). 0이면 끔. -14 = 유튜브·릴스 권장
     color: str = "none"            # 색감: none | warm | cool | bw | vivid | vintage
     gpu: bool = True               # 내보낼 때 그래픽카드 인코더가 있으면 사용
+    include_music: bool = True     # False: 비트 컷은 그대로, 음악 소리만 빼고 (인스타 앱에서 같은 노래 붙이기)
     reels_safe: bool = True        # 세로 영상이면 자막·제목·작은 화면을 릴스 화면 UI가 가리는 곳 밖으로
     safe_guide: bool = False       # 미리보기에 가려지는 곳 표시
     output: str = ""

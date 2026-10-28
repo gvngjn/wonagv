@@ -397,3 +397,17 @@ def test_safe_guide_only_in_preview_option():
     assert args[args.index("-filter_complex") + 1].count("drawbox") == 3
     args = final_args(p, "list.txt", 5.0, "o.mp4", RenderOptions(1080, 1920, 30), None)
     assert "drawbox" not in args[args.index("-filter_complex") + 1]
+
+
+def test_export_without_music_keeps_beat_cuts():
+    from reelcut.timeline import build_segments
+
+    p = Project(clips=[Clip("a.mp4", 30), Clip("b.mp4", 30)])
+    p.music.path, p.music.duration, p.music.beats = "song.mp3", 10, [i * 0.5 for i in range(21)]
+    p.beat_sync.enabled = True
+    with_music = build_segments(p)
+    p.export.include_music = False
+    assert build_segments(p) == with_music                       # 컷은 그대로
+    args = final_args(p, "list.txt", 10.0, "o.mp4", RenderOptions(320, 180, 30), None)
+    assert "song.mp3" not in args and "[am]" not in args[args.index("-filter_complex") + 1]
+    assert "loudnorm" in args[args.index("-filter_complex") + 1]   # 원본 소리는 음량 맞춤

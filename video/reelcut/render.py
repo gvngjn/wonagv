@@ -563,7 +563,7 @@ def final_args(project: Project, concat_list: str, total: float, out_path: str,
         idx += 1
 
     music = project.music
-    if music.path:
+    if music.path and project.export.include_music:
         if music.start > 0:
             args += ["-ss", _num(music.start)]
         args += ["-i", music.path]
@@ -616,7 +616,7 @@ def final_args(project: Project, concat_list: str, total: float, out_path: str,
     # 완전한 무음에 loudnorm을 걸면 NaN이 나와서 내보내기가 실패한다
     clip_sound = project.export.clip_volume > 0 and any(
         c.has_audio and c.volume > 0 and not is_image(c.path) for c in project.clips)
-    has_sound = clip_sound or len(mix) > 1 or bool(music.path)
+    has_sound = clip_sound or len(mix) > 1
     if len(mix) > 1:
         af.append(f"{''.join(mix)}amix=inputs={len(mix)}:duration=first:normalize=0[amixed]")
     else:

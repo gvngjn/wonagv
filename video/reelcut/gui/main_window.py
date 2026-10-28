@@ -398,6 +398,10 @@ class MainWindow(QMainWindow):
         self.gpu.setToolTip("NVIDIA·Intel·AMD 그래픽카드 인코더가 있으면 내보내기를 더 빨리 해요.\n"
                             "안 되면 자동으로 원래 방식(CPU)으로 다시 만들어요.")
         self.gpu.toggled.connect(self._store_export)
+        self.include_music = QCheckBox("음악 넣기")
+        self.include_music.setToolTip("끄면 비트에 맞춘 컷은 그대로 두고 음악 소리만 빼요.\n"
+                                      "저작권 음악은 인스타 앱의 음악 기능으로 같은 노래를 붙이면 음소거될 걱정이 적어요.")
+        self.include_music.toggled.connect(self._store_export)
         self.reels_safe = QCheckBox("릴스 가림 영역 피하기")
         self.reels_safe.setToolTip("세로 영상일 때 자막·제목·작은 화면을 릴스 화면의 설명·버튼이 가리는 곳 밖으로 옮겨요")
         self.reels_safe.toggled.connect(self._store_export)
@@ -440,7 +444,7 @@ class MainWindow(QMainWindow):
         f.addRow("해상도·화질", settings)
         f.addRow("비율이 다른 영상", row_widget(self.fit, self.size_label))
         f.addRow("색감", row_widget(self.color, self.gpu))
-        f.addRow("릴스", row_widget(self.reels_safe, self.safe_guide))
+        f.addRow("릴스", row_widget(self.reels_safe, self.safe_guide, self.include_music))
         f.addRow("시작·끝", row_widget(self.fade, self.loud))
         buttons = QWidget()
         bl = QHBoxLayout(buttons)
@@ -458,7 +462,7 @@ class MainWindow(QMainWindow):
     def _load_export_settings(self) -> None:
         ex = self.project.export
         widgets = (self.size, self.fit, self.fps, self.quality, self.loud, self.fade, self.color, self.gpu,
-                   self.reels_safe, self.safe_guide)
+                   self.reels_safe, self.safe_guide, self.include_music)
         for w in widgets:
             w.blockSignals(True)
         found = find_aspect(ex.width, ex.height)
@@ -474,6 +478,7 @@ class MainWindow(QMainWindow):
         self.loud.setChecked(bool(ex.loudness))
         self.gpu.setChecked(ex.gpu)
         self.reels_safe.setChecked(ex.reels_safe)
+        self.include_music.setChecked(ex.include_music)
         self.safe_guide.setChecked(ex.safe_guide)
         key = f"{float(ex.fade_in)}/{float(ex.fade_out)}"
         if self.fade.findData(key) < 0:
@@ -495,6 +500,7 @@ class MainWindow(QMainWindow):
         ex.color = self.color.currentData()
         ex.gpu = self.gpu.isChecked()
         ex.reels_safe = self.reels_safe.isChecked()
+        ex.include_music = self.include_music.isChecked()
         ex.safe_guide = self.safe_guide.isChecked()
         ex.loudness = -14.0 if self.loud.isChecked() else 0.0
         ex.fade_in, ex.fade_out = (float(v) for v in self.fade.currentData().split("/"))
@@ -800,8 +806,13 @@ class MainWindow(QMainWindow):
             self.status.setText(f"내보내기 완료{how}: " + ", ".join(Path(p).name for p in paths))
             box = QMessageBox(self)
             box.setWindowTitle("ReelCut")
-            box.setText(("영상을 만들었어요!\n" if len(paths) == 1 else f"영상 {len(paths)}개를 만들었어요!\n")
-                        + "\n".join(paths))
+            text = (("영상을 만들었어요!\n" if len(paths) == 1 else f"영상 {len(paths)}개를 만들었어요!\n")
+                    + "\n".join(paths))
+            music = self.project.music
+            if music.path and not self.project.export.include_music:
+                text += (f"\n\n음악 없이 만들었어요. 인스타 앱에서 '{Path(music.path).stem}'을(를) 골라 "
+                         f"{fmt_time(music.start)}부터 시작하게 맞추면 컷이 박자에 맞아요.")
+            box.setText(text)
             play_btn = box.addButton("재생", QMessageBox.ActionRole)
             open_btn = box.addButton("폴더 열기", QMessageBox.ActionRole)
             box.addButton("확인", QMessageBox.AcceptRole)
