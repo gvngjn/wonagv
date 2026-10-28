@@ -363,6 +363,7 @@ class Renderer:
         self._runners: list[ProcessRunner] = [self.runner]
         self._lock = threading.Lock()
         self._cancelled = False
+        self._w1 = 0.5
 
     def cancel(self) -> None:
         with self._lock:
@@ -391,7 +392,7 @@ class Renderer:
             with lock:
                 done = sum(progress)
                 count = finished[0]
-            report(0.5 * min(total, done) / total, f"조각 준비 중 ({count}/{n})")
+            report(self._w1 * min(total, done) / total, f"조각 준비 중 ({count}/{n})")
 
         def job(i: int) -> str:
             seg = segments[i]
@@ -442,6 +443,8 @@ class Renderer:
         else:
             opt = RenderOptions(ex.width // 2 * 2, ex.height // 2 * 2, ex.fps, ex.crf, ex.preset, ex.fit)
 
+        # 진행률에서 1단계가 차지하는 비율 (실측: 내보내기 약 절반, 저화질 미리보기 약 3/4)
+        self._w1 = 0.75 if preview else 0.5
         # 프레임 단위로 맞춘 실제 길이
         total = sum(max(1, int(round(s.duration * opt.fps))) / opt.fps for s in segments)
         work = Path(tempfile.mkdtemp(prefix="reelcut_"))
@@ -466,7 +469,7 @@ class Renderer:
             args = final_args(project, "list.txt", total, str(part), opt, srt_name, fonts_dir)
             try:
                 self.runner.run(
-                    args, lambda t: report(0.5 + 0.5 * min(1.0, t / total), "최종 영상 만드는 중"),
+                    args, lambda t: report(self._w1 + (1 - self._w1) * min(1.0, t / total), "최종 영상 만드는 중"),
                     cwd=str(work),
                 )
                 try:

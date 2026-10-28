@@ -57,3 +57,12 @@ def test_transcribe_uses_whisper_segments(monkeypatch):
     out = subs.transcribe(np.zeros(16000 * 3, np.float32), "tiny", "ko", on_progress=progress.append)
     assert [(e.start, e.end, e.text) for e in out] == [(0.0, 1.2, "안녕하세요"), (2.0, 3.0, "반가워요")]
     assert progress[-1] == 1.0
+
+
+def test_eta_text():
+    from reelcut.textfmt import eta_text
+
+    assert eta_text(2, 0.5) == "" and eta_text(10, 0.01) == "" and eta_text(10, 1.0) == ""
+    assert eta_text(10, 0.5) == "남은 시간 약 10초"
+    assert eta_text(30, 0.25) == "남은 시간 약 1분 30초"
+    assert eta_text(4000, 0.5) == "남은 시간 약 1시간 6분"

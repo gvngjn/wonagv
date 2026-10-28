@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import __version__, autosave
+from ..textfmt import eta_text
 from ..project import ASPECTS, Project, find_aspect
 from .audio_devices import AudioDeviceManager, AudioOutputPicker
 from .panels import ClipsPanel, MusicPanel, PipPanel, SubtitlePanel, fmt_time
@@ -349,12 +350,15 @@ class MainWindow(QMainWindow):
         self._busy(True)
         self.progress.setValue(0)
         self.status.setText(label)
+        self._task_started = time.monotonic()
         self.task.start()
 
     def _on_progress(self, frac: float, msg: str) -> None:
-        self.progress.setValue(int(max(0.0, min(1.0, frac)) * 1000))
+        frac = max(0.0, min(1.0, frac))
+        self.progress.setValue(int(frac * 1000))
         if msg:
-            self.status.setText(msg)
+            eta = eta_text(time.monotonic() - getattr(self, "_task_started", time.monotonic()), frac)
+            self.status.setText(f"{msg} · {eta}" if eta else msg)
 
     def _on_failed(self, msg: str) -> None:
         self._busy(False)
