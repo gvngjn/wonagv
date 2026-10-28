@@ -9,6 +9,8 @@ from __future__ import annotations
 import os
 import shutil
 import tempfile
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -333,14 +335,78 @@ def concat_list_text(files: list[str]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def default_workers() -> int:
+    """동시에 돌릴 ffmpeg 수: 코어 절반, 최대 4."""
+    return max(1, min(4, (os.cpu_count() or 2) // 2))
+
+
 class Renderer:
     """프로젝트를 mp4로 렌더링. on_progress(0~1, 상태 메시지)."""
 
-    def __init__(self) -> None:
+    def __init__(self, workers: int | None = None) -> None:
         self.runner = ProcessRunner()
+        self.workers = workers or default_workers()
+        self._runners: list[ProcessRunner] = [self.runner]
+        self._lock = threading.Lock()
+        self._cancelled = False
 
     def cancel(self) -> None:
-        self.runner.cancel()
+        with self._lock:
+            self._cancelled = True
+            runners = list(self._runners)
+        for r in runners:
+            r.cancel()
+
+    def _new_runner(self) -> ProcessRunner:
+        r = ProcessRunner()
+        with self._lock:
+            if self._cancelled:
+                r.cancel()
+            self._runners.append(r)
+        return r
+
+    def _render_segments(self, segments: list[Segment], work: Path, opt: RenderOptions,
+                         total: float, report: Callable[[float, str], None]) -> list[str]:
+        """1단계를 여러 개 동시에 실행 (조각이 많을수록 빨라짐)."""
+        n = len(segments)
+        progress = [0.0] * n
+        finished = [0]
+        lock = threading.Lock()
+
+        def show() -> None:
+            with lock:
+                done = sum(progress)
+                count = finished[0]
+            report(0.5 * min(total, done) / total, f"조각 준비 중 ({count}/{n})")
+
+        def job(i: int) -> str:
+            seg = segments[i]
+            out = work / f"seg_{i:04d}.mkv"
+            runner = self._new_runner()
+
+            def on_time(t: float) -> None:
+                progress[i] = min(seg.duration, t)
+                show()
+
+            runner.run(segment_args(seg, str(out), opt), on_time)
+            with lock:
+                progress[i] = seg.duration
+                finished[0] += 1
+            show()
+            return out.name
+
+        show()
+        if self.workers <= 1 or n <= 1:
+            return [job(i) for i in range(n)]
+        with ThreadPoolExecutor(max_workers=self.workers) as pool:
+            futures = [pool.submit(job, i) for i in range(n)]
+            try:
+                return [f.result() for f in futures]
+            except BaseException:
+                self.cancel()          # 하나라도 실패하면 나머지 중단
+                for f in futures:
+                    f.cancel()
+                raise
 
     def render(self, project: Project, out_path: str, preview: bool = False,
                on_progress: Callable[[float, str], None] | None = None) -> float:
@@ -361,19 +427,7 @@ class Renderer:
         work = Path(tempfile.mkdtemp(prefix="reelcut_"))
         report = on_progress or (lambda f, m: None)
         try:
-            files = []
-            done = 0.0
-            for i, seg in enumerate(segments):
-                out = work / f"seg_{i:04d}.mkv"
-                msg = f"조각 준비 중 ({i + 1}/{len(segments)})"
-                report(0.5 * done / total, msg)
-                base_done = done
-                self.runner.run(
-                    segment_args(seg, str(out), opt),
-                    lambda t, b=base_done, m=msg: report(0.5 * min(total, b + t) / total, m),
-                )
-                done += seg.duration
-                files.append(out.name)
+            files = self._render_segments(segments, work, opt, total, report)
             (work / "list.txt").write_text(concat_list_text(files), encoding="utf-8")
 
             srt_name = None

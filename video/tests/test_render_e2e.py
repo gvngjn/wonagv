@@ -96,3 +96,31 @@ def test_vertical_reels_render(media, tmp_path, fit):
     info = probe(str(out))
     assert (info.width, info.height) == (180, 320)
     assert info.duration == pytest.approx(7.0, abs=0.1)
+
+
+@needs_ffmpeg
+def test_cancel_stops_parallel_render(media, tmp_path):
+    import threading
+    import time
+
+    from reelcut.ffmpeg import Cancelled
+
+    p = base_project(media)
+    p.clips = p.clips * 6                      # 조각 18개
+    r = Renderer(workers=2)
+    err = []
+
+    def run():
+        try:
+            r.render(p, str(tmp_path / "x.mp4"))
+        except Exception as e:  # noqa: BLE001
+            err.append(e)
+
+    t = threading.Thread(target=run)
+    t.start()
+    time.sleep(0.8)
+    r.cancel()
+    t.join(30)
+    assert not t.is_alive()
+    assert err and isinstance(err[0], Cancelled)
+    assert not (tmp_path / "x.mp4").exists()
