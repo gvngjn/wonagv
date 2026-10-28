@@ -273,3 +273,47 @@ def segment_starts(segments: list[Segment]) -> list[float]:
         out.append(t)
         t += s.duration
     return out
+
+
+MONTH_FORMATS = {
+    "en": ("JANUARY", "FEBRUARY", "MARCH", "APRIL", "MAY", "JUNE", "JULY", "AUGUST", "SEPTEMBER",
+           "OCTOBER", "NOVEMBER", "DECEMBER"),
+    "en_short": ("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"),
+    "ko": tuple(f"{m}월" for m in range(1, 13)),
+    "num": tuple(f"{m:02d}" for m in range(1, 13)),
+}
+
+
+def month_titles(project, fmt: str = "en", show: float = 1.2) -> list:
+    """완성 영상에서 달이 바뀌는 순간마다 월 이름 제목 (1년 recap 등).
+
+    클립의 찍은 시각 기준. 다음 달이 금방 시작하면 그 전에 사라진다.
+    """
+    import time
+
+    from .project import TitleEntry
+
+    names = MONTH_FORMATS.get(fmt, MONTH_FORMATS["en"])
+    shot = {}
+    for c in project.clips:
+        shot.setdefault(c.path, c.shot_at)
+    segs = build_segments(project)
+    starts = segment_starts(segs)
+    marks: list[tuple[float, int]] = []
+    last = None
+    for seg, t in zip(segs, starts):
+        when = shot.get(seg.path, 0.0)
+        if not when:
+            continue
+        lt = time.localtime(when)
+        month = (lt.tm_year, lt.tm_mon)
+        if month != last:
+            marks.append((t, lt.tm_mon))
+            last = month
+    total = total_duration(segs)
+    out = []
+    for i, (t, m) in enumerate(marks):
+        end = min(t + show, marks[i + 1][0] if i + 1 < len(marks) else total, total)
+        if end - t > 0.2:
+            out.append(TitleEntry(round(t, 3), round(end, 3), names[m - 1]))
+    return out

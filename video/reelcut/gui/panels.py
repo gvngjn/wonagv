@@ -10,7 +10,8 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDateTimeEdit, QDoubleSpinBox, QFileDialog,
     QFontComboBox,
     QFormLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-    QMessageBox, QProgressDialog, QPushButton, QSizePolicy, QSlider, QSpinBox, QTableWidget, QTableWidgetItem,
+    QMenu, QMessageBox, QProgressDialog, QPushButton, QSizePolicy, QSlider, QSpinBox, QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout, QWidget,
 )
 
@@ -1361,6 +1362,13 @@ class TitlePanel(QWidget):
         add.clicked.connect(self.add_row)
         rm = QPushButton("삭제")
         rm.clicked.connect(self.remove_rows)
+        months = QPushButton("📅 월별 제목 자동")
+        months.setToolTip("클립의 찍은 날짜를 보고 달이 바뀔 때마다 월 이름 제목을 넣어요 (1년 recap 등)")
+        month_menu = QMenu(months)
+        for key, label in (("en", "JANUARY, FEBRUARY …"), ("en_short", "JAN, FEB …"),
+                           ("ko", "1월, 2월 …"), ("num", "01, 02 …")):
+            month_menu.addAction(label, lambda k=key: self.add_month_titles(k))
+        months.setMenu(month_menu)
         self.warn = QLabel()
         self.warn.setStyleSheet("color: #c0392b")
 
@@ -1398,7 +1406,7 @@ class TitlePanel(QWidget):
 
         lay = QVBoxLayout(self)
         lay.addWidget(hint)
-        lay.addWidget(row(add, rm, None))
+        lay.addWidget(row(add, rm, None, months))
         lay.addWidget(self.table, 1)
         lay.addWidget(self.warn)
         lay.addWidget(style)
@@ -1524,6 +1532,30 @@ class TitlePanel(QWidget):
         self._loading = False
         self.project.titles.entries = entries
         self.warn.setText(f"시간 형식이 잘못된 줄 {bad}개는 빠져요 (예: 00:00:03,000)." if bad else "")
+
+    def add_month_titles(self, fmt: str) -> None:
+        from ..timeline import month_titles
+
+        entries = month_titles(self.project, fmt)
+        if not entries:
+            QMessageBox.information(self, "ReelCut", "찍은 날짜가 있는 클립이 없어요. 클립 탭에서 날짜를 확인해 주세요.")
+            return
+        t = self.project.titles
+        if t.entries:
+            box = QMessageBox(self)
+            box.setWindowTitle("월별 제목")
+            box.setText(f"월 제목 {len(entries)}개를 넣을게요. 지금 있는 제목 {len(t.entries)}개는 어떻게 할까요?")
+            replace_btn = box.addButton("지우고 넣기", QMessageBox.AcceptRole)
+            keep_btn = box.addButton("같이 두기", QMessageBox.ActionRole)
+            box.addButton("취소", QMessageBox.RejectRole)
+            box.exec()
+            if box.clickedButton() is replace_btn:
+                t.entries = []
+            elif box.clickedButton() is not keep_btn:
+                return
+        t.entries = sorted(t.entries + entries, key=lambda e: e.start)
+        self.reload()
+        self.changed.emit()
 
     def add_row(self) -> None:
         from ..project import TitleEntry

@@ -152,3 +152,19 @@ def test_per_clip_with_beats_and_seconds_without_music():
     q = Project(clips=_eight_clips())
     q.beat_sync = BeatSyncSettings(enabled=True, cut_unit="seconds", cut_seconds=1.0)
     assert total_duration(build_segments(q)) == pytest.approx(sum(c.length for c in q.clips), abs=1.0)
+
+
+def test_month_titles_follow_shot_dates():
+    import time
+
+    from reelcut.project import Clip, Project
+    from reelcut.timeline import month_titles
+
+    day = lambda m, d: time.mktime((2026, m, d, 12, 0, 0, 0, 0, -1))
+    p = Project(clips=[Clip("a.mp4", 10, 0, 2, shot_at=day(1, 3)), Clip("b.mp4", 10, 0, 3, shot_at=day(1, 20)),
+                       Clip("c.mp4", 10, 0, 0.5, shot_at=day(3, 1)), Clip("d.mp4", 10, 0, 2, shot_at=day(4, 9)),
+                       Clip("e.mp4", 10, 0, 2)])
+    got = [(e.start, e.end, e.text) for e in month_titles(p)]
+    # 1월은 0초, 3월은 5초(다음 달이 0.5초 뒤라 거기서 끝), 4월은 5.5초, 날짜 없는 클립은 무시
+    assert got == [(0.0, 1.2, "JANUARY"), (5.0, 5.5, "MARCH"), (5.5, 6.7, "APRIL")]
+    assert [e.text for e in month_titles(p, "ko")] == ["1월", "3월", "4월"]
