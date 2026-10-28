@@ -414,3 +414,25 @@ def test_export_without_music_keeps_beat_cuts():
     args = final_args(p, "list.txt", 10.0, "o.mp4", RenderOptions(320, 180, 30), None)
     assert "song.mp3" not in args and "[am]" not in args[args.index("-filter_complex") + 1]
     assert "loudnorm" in args[args.index("-filter_complex") + 1]   # 원본 소리는 음량 맞춤
+
+
+def test_date_stamp_events():
+    import time as _t
+
+    from reelcut.project import DateStamp
+    from reelcut.render import stamp_events, stamp_text, titles_ass
+
+    t = _t.mktime((2026, 3, 14, 12, 0, 0, 0, 0, -1))
+    assert stamp_text(t, "film") == "'26 3 14" and stamp_text(t, "dot") == "2026.03.14"
+    assert stamp_text(t, "short") == "26.03.14" and stamp_text(t, "en") == "MAR 14" and stamp_text(t, "ko") == "3월 14일"
+    assert stamp_text(0, "dot") == ""
+    aug = _t.mktime((2026, 8, 2, 12, 0, 0, 0, 0, -1))
+    p = Project(clips=[Clip("a.mp4", 10, shot_at=t), Clip("b.mp4", 10, shot_at=t), Clip("c.mp4", 10, shot_at=aug),
+                       Clip("d.mp4", 10)])
+    p.stamp = DateStamp(enabled=True, format="dot")
+    segs = [Segment("a.mp4", 0, 1.0), Segment("b.mp4", 0, 1.5), Segment("c.mp4", 0, 2.0), Segment("d.mp4", 0, 1.0)]
+    # 같은 날짜 a·b는 하나로 합치고, 날짜 모르는 d는 빼기
+    assert stamp_events(p, segs, 30) == [(0.0, 2.5, "2026.03.14"), (2.5, 4.5, "2026.08.02")]
+    ass = titles_ass(p.titles, 1080, 1920, stamp=p.stamp, stamps=stamp_events(p, segs, 30))
+    assert "Style: Stamp,Courier New" in ass and ass.count("Stamp,,0,0,0,,") == 2
+    assert "Style: Stamp" not in titles_ass(p.titles, 1080, 1920)

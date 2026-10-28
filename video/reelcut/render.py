@@ -11,6 +11,8 @@ import os
 import shutil
 import tempfile
 import threading
+import time
+from types import SimpleNamespace
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -409,7 +411,46 @@ def animated_subs_ass(entries, animation: str) -> str:
     return "\n".join(lines) + "\n"
 
 
-def titles_ass(t: TitleSettings, w: int, h: int, insets: tuple[float, float, float] = NO_INSETS) -> str:
+_MONTHS_EN = ("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC")
+
+
+def stamp_text(t: float, fmt: str) -> str:
+    """찍은 시각 → 날짜 도장 글자."""
+    if not t:
+        return ""
+    lt = time.localtime(t)
+    y, m, d = lt.tm_year, lt.tm_mon, lt.tm_mday
+    return {
+        "dot": f"{y}.{m:02d}.{d:02d}",
+        "short": f"{y % 100:02d}.{m:02d}.{d:02d}",
+        "en": f"{_MONTHS_EN[m - 1]} {d}",
+        "ko": f"{m}월 {d}일",
+    }.get(fmt, f"'{y % 100:02d} {m} {d}")
+
+
+def stamp_events(project: Project, segments: list[Segment], fps: float) -> list[tuple[float, float, str]]:
+    """조각마다 그 클립의 찍은 날짜 (같은 날짜가 이어지면 하나로 합친다)."""
+    shot = {}
+    for c in project.clips:
+        shot.setdefault(c.path, c.shot_at)
+    events: list[tuple[float, float, str]] = []
+    t = 0.0
+    for seg in segments:
+        d = max(1, int(round(seg.duration * fps))) / fps     # 렌더링과 같은 프레임 단위 길이
+        text = stamp_text(shot.get(seg.path, 0.0), project.stamp.format)
+        if text and events and events[-1][2] == text and abs(events[-1][1] - t) < 1e-6:
+            events[-1] = (events[-1][0], t + d, text)
+        elif text:
+            events.append((t, t + d, text))
+        t += d
+    return events
+
+
+STAMP_FILM_FONT = "Courier New"
+
+
+def titles_ass(t: TitleSettings, w: int, h: int, insets: tuple[float, float, float] = NO_INSETS,
+               stamp=None, stamps: list[tuple[float, float, str]] = ()) -> str:
     """제목용 ASS 자막 파일 내용 (화면 크기 그대로를 좌표로 사용)."""
     size = max(8, int(round(h * t.size / 100)))
     outline = round(h * t.outline / 100, 1)
@@ -432,6 +473,7 @@ def titles_ass(t: TitleSettings, w: int, h: int, insets: tuple[float, float, flo
         f"Style: Title,{name},{size},{ass_color(t.color)},{ass_color(t.color)},{ass_color(t.outline_color)},"
         f"&H80000000,{-1 if t.bold else 0},0,0,0,100,100,0,0,1,{outline},{round(outline / 2, 1)},"
         f"{align},{int(w * 0.05)},{margin_r},{margin},1",
+        *([_stamp_style(stamp, t, w, h, insets)] if stamps else []),
         "", "[Events]",
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
     ]
@@ -440,7 +482,27 @@ def titles_ass(t: TitleSettings, w: int, h: int, insets: tuple[float, float, flo
             continue
         lines.append(f"Dialogue: 0,{_ass_time(e.start)},{_ass_time(e.end)},Title,,0,0,0,,"
                      f"{{\\fad({fade},{fade})}}{_ass_escape(e.text.strip())}")
+    for start, end, text in stamps:
+        lines.append(f"Dialogue: 1,{_ass_time(start)},{_ass_time(end)},Stamp,,0,0,0,,{_ass_escape(text)}")
     return "\n".join(lines) + "\n"
+
+
+def _stamp_style(stamp, t: TitleSettings, w: int, h: int, insets: tuple[float, float, float]) -> str:
+    """날짜 도장 스타일: film = 필름 카메라처럼 주황 숫자에 은은한 번짐, simple = 제목 글꼴 흰 글자."""
+    size = max(8, int(round(h * stamp.size / 100)))
+    align = {"bottom-left": 1, "bottom-right": 3, "top-left": 7, "top-right": 9}.get(stamp.position, 3)
+    side = int(round(w * 0.05))
+    margin_l = side
+    margin_r = max(side, int(round(w * insets[2])))
+    margin_v = max(int(round(h * 0.04)), int(round(h * (insets[0] if align >= 7 else insets[1]))))
+    if stamp.style == "film":
+        color, outline_color = "&H001F8AFF", "&H60004AC0"      # 주황 글자, 진한 주황 번짐 (ASS는 BGR)
+        name, bold, outline, shadow = STAMP_FILM_FONT, -1, round(size * 0.08, 1), 0
+    else:
+        color, outline_color = "&H00FFFFFF", "&H00000000"
+        name, bold, outline, shadow = t.font_name.replace(",", " "), -1, round(size * 0.06, 1), round(size * 0.04, 1)
+    return (f"Style: Stamp,{name},{size},{color},{color},{outline_color},&H80000000,{bold},0,0,0,100,100,"
+            f"{1 if stamp.style == 'film' else 0},0,1,{outline},{shadow},{align},{margin_l},{margin_r},{margin_v},1")
 
 
 def fonts_option(fonts_dir: str | None) -> str:
@@ -919,13 +981,17 @@ class Renderer:
                     save_srt(work / srt_name, subs.entries)
                 if project.subtitles.burn_in:
                     font_styles.append(project.subtitles)
-            if any(e.text.strip() for e in project.titles.entries):
+            stamps = stamp_events(project, segments, opt.fps) if project.stamp.enabled else []
+            if stamps or any(e.text.strip() for e in project.titles.entries):
                 titles_name = "titles.ass"
                 (work / titles_name).write_text(titles_ass(project.titles, opt.width, opt.height,
                                                            safe_insets(opt.width, opt.height,
-                                                                       project.export.reels_safe)),
+                                                                       project.export.reels_safe),
+                                                           project.stamp, stamps),
                                                 encoding="utf-8")
                 font_styles.append(project.titles)
+                if stamps and project.stamp.style == "film":
+                    font_styles.append(SimpleNamespace(font_name=STAMP_FILM_FONT, font_file=""))
             fonts_dir = prepare_fonts(font_styles, work) if font_styles else None
 
             out_final = Path(out_path).resolve()

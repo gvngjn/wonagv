@@ -1403,6 +1403,35 @@ class TitlePanel(QWidget):
         lay.addWidget(self.warn)
         lay.addWidget(style)
 
+        # 날짜 도장: 클립마다 찍은 날짜를 구석에 (1년 recap 등)
+        stamp_box = QGroupBox("날짜 도장 (클립마다 찍은 날짜)")
+        self.stamp_on = QCheckBox("켜기")
+        self.stamp_style = QComboBox()
+        for key, label in (("film", "필름 카메라 (주황 숫자)"), ("simple", "깔끔한 흰 글자")):
+            self.stamp_style.addItem(label, key)
+        self.stamp_format = QComboBox()
+        for key, label in (("film", "'26 3 14"), ("dot", "2026.03.14"), ("short", "26.03.14"),
+                           ("en", "MAR 14"), ("ko", "3월 14일")):
+            self.stamp_format.addItem(label, key)
+        self.stamp_pos = QComboBox()
+        for key, label in (("bottom-right", "오른쪽 아래"), ("bottom-left", "왼쪽 아래"),
+                           ("top-right", "오른쪽 위"), ("top-left", "왼쪽 위")):
+            self.stamp_pos.addItem(label, key)
+        stamp_note = QLabel("날짜는 클립 탭의 '찍은 시각'을 써요. 같은 날짜가 이어지면 한 번만 보여요.")
+        stamp_note.setStyleSheet("color: gray")
+        stamp_note.setWordWrap(True)
+        sf2 = QFormLayout(stamp_box)
+        sf2.addRow(row(self.stamp_on, self.stamp_style, self.stamp_format, self.stamp_pos, None))
+        sf2.addRow(stamp_note)
+        lay.addWidget(stamp_box)
+        self.stamp_on.toggled.connect(self._store)
+        for w in (self.stamp_style, self.stamp_format, self.stamp_pos):
+            w.currentIndexChanged.connect(self._store)
+        # 필름 스타일을 고르면 날짜 형식도 필름식으로
+        self.stamp_style.currentIndexChanged.connect(
+            lambda: self._loading or self.stamp_format.setCurrentIndex(
+                self.stamp_format.findData("film" if self.stamp_style.currentData() == "film" else "dot")))
+
         self.font.currentFontChanged.connect(self._on_font_picked)
         self.size_slider.valueChanged.connect(self._store)
         self.bold.toggled.connect(self._store)
@@ -1426,6 +1455,13 @@ class TitlePanel(QWidget):
         self.outline_color_btn.set_color(t.outline_color)
         self.position.setCurrentIndex(max(0, self.position.findData(t.position)))
         self.fade.setValue(t.fade)
+        st = self.project.stamp
+        self.stamp_on.setChecked(st.enabled)
+        self.stamp_style.setCurrentIndex(max(0, self.stamp_style.findData(st.style)))
+        self.stamp_format.setCurrentIndex(max(0, self.stamp_format.findData(st.format)))
+        self.stamp_pos.setCurrentIndex(max(0, self.stamp_pos.findData(st.position)))
+        for w in (self.stamp_style, self.stamp_format, self.stamp_pos):
+            w.setEnabled(st.enabled)
         self.table.setRowCount(0)
         for e in sorted(t.entries, key=lambda x: x.start):
             self._append(e)
@@ -1450,6 +1486,13 @@ class TitlePanel(QWidget):
         t.outline_color = self.outline_color_btn.color
         t.position = self.position.currentData()
         t.fade = self.fade.value()
+        st = self.project.stamp
+        st.enabled = self.stamp_on.isChecked()
+        st.style = self.stamp_style.currentData()
+        st.format = self.stamp_format.currentData()
+        st.position = self.stamp_pos.currentData()
+        for w in (self.stamp_style, self.stamp_format, self.stamp_pos):
+            w.setEnabled(st.enabled)
         self.changed.emit()
 
     def _on_item_changed(self, _item) -> None:

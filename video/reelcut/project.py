@@ -188,6 +188,16 @@ class TitleSettings:
 
 
 @dataclass
+class DateStamp:
+    """클립마다 찍은 날짜를 화면 구석에 (1년 recap 영상 등)."""
+    enabled: bool = False
+    style: str = "film"            # film(필름 카메라 주황 숫자) | simple(흰 글자, 제목 글꼴)
+    format: str = "film"           # film('26 3 14) | dot(2026.03.14) | short(26.03.14) | en(MAR 14) | ko(3월 14일)
+    position: str = "bottom-right"  # bottom-right | bottom-left | top-right | top-left
+    size: float = 3.2              # 글자 높이 = 화면 높이의 몇 %
+
+
+@dataclass
 class ExportSettings:
     width: int = 1920
     height: int = 1080
@@ -215,6 +225,7 @@ class Project:
     pips: list[PipOverlay] = field(default_factory=list)
     subtitles: SubtitleSettings = field(default_factory=SubtitleSettings)
     titles: TitleSettings = field(default_factory=TitleSettings)
+    stamp: DateStamp = field(default_factory=DateStamp)
     export: ExportSettings = field(default_factory=ExportSettings)
 
     # ---- 파일 확인 / 다시 연결 ----
@@ -286,6 +297,7 @@ class Project:
         subs = d.get("subtitles") or {}
         p.subtitles = build(SubtitleSettings, {k: v for k, v in subs.items() if k != "entries"})
         p.subtitles.entries = [build(SubtitleEntry, e) for e in subs.get("entries", [])]
+        p.stamp = build(DateStamp, d.get("stamp"))
         titles = d.get("titles") or {}
         p.titles = build(TitleSettings, {k: v for k, v in titles.items() if k != "entries"})
         p.titles.entries = [build(TitleEntry, e) for e in titles.get("entries", [])]
