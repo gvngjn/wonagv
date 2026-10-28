@@ -50,3 +50,44 @@ def readable_image(path: str) -> str:
         except Exception as e:  # noqa: BLE001 - 사용자에게 알기 쉬운 메시지로
             raise RuntimeError(f"HEIC 사진을 읽지 못했어요: {Path(path).name} ({e})") from e
     return str(out)
+
+
+def photo_taken_time(path: str) -> float:
+    """사진 EXIF의 찍은 시각 (유닉스 시간, 모르면 0)."""
+    import time
+
+    try:
+        from PIL import Image
+        if is_heic(path):
+            import pillow_heif
+            pillow_heif.register_heif_opener()
+        with Image.open(path) as im:
+            exif = im.getexif()
+            sub = exif.get_ifd(0x8769)          # Exif IFD
+            text = sub.get(0x9003) or exif.get(0x0132)   # DateTimeOriginal, 없으면 DateTime
+            offset = sub.get(0x9011)            # OffsetTimeOriginal (예: +09:00)
+    except Exception:  # noqa: BLE001 - 날짜를 못 읽으면 파일 시각을 쓴다
+        return 0.0
+    if not text:
+        return 0.0
+    try:
+        st = time.strptime(str(text).strip()[:19], "%Y:%m:%d %H:%M:%S")
+    except ValueError:
+        return 0.0
+    if offset:
+        from .ffmpeg import parse_time
+        return parse_time(time.strftime("%Y-%m-%dT%H:%M:%S", st) + str(offset).strip())
+    return time.mktime(st)      # 시간대가 없으면 이 컴퓨터 시간대로
+
+
+def shot_time(path: str, created: float = 0.0) -> float:
+    """찍은 시각: 영상 메타데이터 → 사진 EXIF → 파일 수정 시각 순으로."""
+    from .render import is_image
+
+    t = created or (photo_taken_time(path) if is_image(path) else 0.0)
+    if not t:
+        try:
+            t = os.path.getmtime(path)
+        except OSError:
+            t = 0.0
+    return t

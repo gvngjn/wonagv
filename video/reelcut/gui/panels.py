@@ -1,21 +1,22 @@
 """왼쪽 탭에 들어가는 편집 패널들."""
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QKeySequence, QPainter, QPen, QShortcut
 from PySide6.QtWidgets import (
-    QAbstractItemView, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFontComboBox,
+    QAbstractItemView, QApplication, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFontComboBox,
     QFormLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-    QMessageBox, QPushButton, QSizePolicy, QSlider, QSpinBox, QTableWidget, QTableWidgetItem,
+    QMessageBox, QProgressDialog, QPushButton, QSizePolicy, QSlider, QSpinBox, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QWidget,
 )
 
 from .. import subtitles as subs
 from ..ffmpeg import probe
 from ..project import Clip, PipOverlay, Project, SubtitleEntry
-from ..photos import readable_image
+from ..photos import readable_image, shot_time
 from ..render import is_image
 from .music_gauge import MusicGauge, MusicPreviewPlayer
 from .thumbnails import THUMB_H, THUMB_W, ThumbnailLoader
@@ -66,14 +67,31 @@ def row(*widgets) -> QWidget:
     return w
 
 
+MEDIA_EXTS = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v", ".wmv", ".mts", ".3gp",
+              ".jpg", ".jpeg", ".png", ".bmp", ".webp", ".heic", ".heif"}
+
+
+def media_in_folder(folder: str) -> list[str]:
+    """폴더(하위 폴더 포함) 안의 영상·사진 경로. 숨김 파일·아이폰 편집 사본(.AAE 등)은 뺀다."""
+    found = []
+    for root, dirs, files in os.walk(folder):
+        dirs[:] = sorted(d for d in dirs if not d.startswith("."))
+        for f in sorted(files):
+            if not f.startswith(".") and Path(f).suffix.lower() in MEDIA_EXTS:
+                found.append(os.path.join(root, f))
+    return found
+
+
 def make_clip(path: str) -> Clip:
     if is_image(path):
         readable_image(path)        # HEIC는 여기서 미리 바꿔 두고, 못 읽으면 바로 알린다
-        return Clip(path, duration=0.0, in_point=0.0, out_point=IMAGE_DEFAULT_SECONDS, has_audio=False)
+        return Clip(path, duration=0.0, in_point=0.0, out_point=IMAGE_DEFAULT_SECONDS, has_audio=False,
+                    shot_at=shot_time(path))
     info = probe(path)
     if not info.has_video:
         raise ValueError(f"영상이 없는 파일이에요: {Path(path).name}")
-    return Clip(path, info.duration, 0.0, 0.0, info.has_audio, info.width, info.height)
+    return Clip(path, info.duration, 0.0, 0.0, info.has_audio, info.width, info.height,
+                shot_at=shot_time(path, info.created))
 
 
 # ------------------------------------------------------------------ 클립
@@ -117,6 +135,12 @@ class ClipsPanel(QWidget):
 
         add = QPushButton("＋ 클립 추가")
         add.clicked.connect(self.add_dialog)
+        add_folder = QPushButton("📁 폴더")
+        add_folder.setToolTip("폴더 안(하위 폴더 포함)의 영상·사진을 찍은 날짜순으로 한꺼번에 추가")
+        add_folder.clicked.connect(self.add_folder_dialog)
+        by_date = QPushButton("📅 날짜순")
+        by_date.setToolTip("모든 클립을 찍은 날짜·시간 순서로 정렬 (여행 순서대로)")
+        by_date.clicked.connect(self.sort_by_date)
         remove = QPushButton("삭제")
         remove.clicked.connect(self.remove_selected)
         up = QPushButton("▲")
@@ -172,7 +196,7 @@ class ClipsPanel(QWidget):
         hint.setStyleSheet("color: gray")
 
         lay = QVBoxLayout(self)
-        lay.addWidget(row(add, remove, None, up, down))
+        lay.addWidget(row(add, add_folder, remove, None, by_date, up, down))
         lay.addWidget(self.list, 1)
         lay.addWidget(self.total_label)
         lay.addWidget(self.edit_box)
@@ -205,6 +229,9 @@ class ClipsPanel(QWidget):
             extra += f"  ⏩{c.speed:g}배" if c.speed > 1 else f"  🐢{c.speed:g}배"
         if c.has_audio and c.volume <= 0:
             extra += "  🔇"
+        if c.shot_at:
+            import time
+            extra += "  " + time.strftime("%m/%d %H:%M", time.localtime(c.shot_at))
         item.setText(f"{kind} {c.name}   {fmt_time(c.timeline_length)}{trimmed}{extra}")
         at = self._thumb_time(c)
         item.setData(Qt.UserRole + 1, ThumbnailLoader.key(c.path, at))
@@ -223,13 +250,32 @@ class ClipsPanel(QWidget):
             if item.data(Qt.UserRole + 1) == key:
                 item.setIcon(QIcon(pm))
 
-    def add_files(self, paths: list[str]) -> None:
+    def add_files(self, paths: list[str], sort_new: bool = False) -> None:
         errors = []
-        for p in paths:
+        new: list[Clip] = []
+        progress = None
+        if len(paths) > 3:
+            # 파일이 많으면(폴더 추가) 화면이 멈춘 것처럼 보이지 않게 진행 창을 띄운다
+            progress = QProgressDialog("클립 읽는 중…", "그만", 0, len(paths), self)
+            progress.setWindowTitle("클립 추가")
+            progress.setWindowModality(Qt.WindowModal)
+            progress.setMinimumDuration(300)
+        for i, p in enumerate(paths):
+            if progress:
+                progress.setValue(i)
+                progress.setLabelText(f"클립 읽는 중… {i + 1}/{len(paths)}\n{Path(p).name}")
+                QApplication.processEvents()
+                if progress.wasCanceled():
+                    break
             try:
-                self.project.clips.append(make_clip(p))
+                new.append(make_clip(p))
             except Exception as e:
                 errors.append(str(e))
+        if progress:
+            progress.close()
+        if sort_new:
+            new.sort(key=lambda c: c.shot_at)
+        self.project.clips.extend(new)
         self.reload()
         self.list.setCurrentRow(len(self.project.clips) - 1)
         self.changed.emit()
@@ -240,6 +286,23 @@ class ClipsPanel(QWidget):
         paths, _ = QFileDialog.getOpenFileNames(self, "클립 추가", "", VIDEO_FILTER)
         if paths:
             self.add_files(paths)
+
+    def add_folder_dialog(self) -> None:
+        folder = QFileDialog.getExistingDirectory(self, "영상·사진이 있는 폴더")
+        if not folder:
+            return
+        paths = media_in_folder(folder)
+        if not paths:
+            QMessageBox.information(self, "ReelCut", "이 폴더에는 영상이나 사진이 없어요.")
+            return
+        self.add_files(paths, sort_new=True)
+
+    def sort_by_date(self) -> None:
+        if len(self.project.clips) < 2:
+            return
+        self.project.clips.sort(key=lambda c: c.shot_at or float("inf"))
+        self.reload()
+        self.changed.emit()
 
     def remove_selected(self) -> None:
         r = self.list.currentRow()

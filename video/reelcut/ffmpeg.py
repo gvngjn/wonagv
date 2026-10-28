@@ -91,10 +91,32 @@ class MediaInfo:
     fps: float = 0.0
     has_video: bool = False
     has_audio: bool = False
+    created: float = 0.0           # 찍은 시각 (유닉스 시간, 모르면 0)
 
     @property
     def is_audio_only(self) -> bool:
         return self.has_audio and not self.has_video
+
+
+def parse_time(text: str) -> float:
+    """'2025-03-14T09:12:30.000000Z', '2025-03-14T18:12:30+0900' 같은 시각 → 유닉스 시간 (모르면 0)."""
+    from datetime import datetime, timezone
+
+    text = (text or "").strip()
+    if not text:
+        return 0.0
+    text = text.replace("Z", "+00:00")
+    # +0900 → +09:00 (파이썬 3.10 호환)
+    if len(text) > 5 and text[-5] in "+-" and text[-4:].isdigit():
+        text = text[:-2] + ":" + text[-2:]
+    try:
+        dt = datetime.fromisoformat(text)
+    except ValueError:
+        return 0.0
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    t = dt.timestamp()
+    return t if t > 86400 * 365 else 0.0     # 1970년 같은 빈 값은 무시
 
 
 def _parse_rate(rate: str | None) -> float:
@@ -132,6 +154,12 @@ def parse_probe_json(path: str, data: dict) -> MediaInfo:
             break
     info = MediaInfo(path=path, duration=duration, has_video=video is not None,
                      has_audio=audio is not None)
+    tags = {k.lower(): v for k, v in (fmt.get("tags") or {}).items()}
+    if video:
+        tags = {**{k.lower(): v for k, v in (video.get("tags") or {}).items()}, **tags}
+    # 아이폰은 현지 시간대가 붙은 creationdate를 따로 남긴다 (creation_time은 UTC)
+    info.created = parse_time(tags.get("com.apple.quicktime.creationdate", "")) or parse_time(
+        tags.get("creation_time", ""))
     if video:
         info.width = int(video.get("width") or 0)
         info.height = int(video.get("height") or 0)

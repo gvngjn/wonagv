@@ -19,6 +19,7 @@ class Clip:
     height: int = 0
     volume: float = 1.0            # 이 클립 원본 소리 크기 (0 = 음소거)
     speed: float = 1.0             # 재생 속도 (0.5 = 느리게, 2 = 빠르게)
+    shot_at: float = 0.0           # 찍은 시각 (날짜순 정렬용, 유닉스 시간)
     motion: str = "auto"           # 사진 움직임: none | auto | zoom_in | zoom_out | pan_left | pan_right
 
     @property

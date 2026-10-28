@@ -329,3 +329,42 @@ def test_tonemap_only_for_hdr(monkeypatch):
     assert graph.startswith("[0:v]zscale=tin=arib-std-b67") and "tonemap=tonemap=mobius" in graph
     sdr = segment_args(Segment("android.mp4", 0, 1.0), "o.mkv", RenderOptions(320, 180, 30))
     assert "tonemap" not in sdr[sdr.index("-filter_complex") + 1]
+
+
+def test_parse_shot_times():
+    from reelcut.ffmpeg import parse_probe_json, parse_time
+
+    utc = parse_time("2025-03-14T03:00:00.000000Z")
+    assert parse_time("2025-03-14T12:00:00+0900") == utc == parse_time("2025-03-14T12:00:00+09:00")
+    assert parse_time("") == 0 and parse_time("garbage") == 0 and parse_time("1970-01-01T00:00:00Z") == 0
+    # 아이폰: 현지 시간대가 붙은 creationdate를 creation_time(UTC)보다 먼저 쓴다
+    info = parse_probe_json("a.mov", {"format": {"duration": "2", "tags": {
+        "creation_time": "2025-03-14T03:00:05Z", "com.apple.quicktime.creationdate": "2025-03-14T12:00:00+0900"}},
+        "streams": [{"codec_type": "video", "width": 10, "height": 10}]})
+    assert info.created == utc
+
+
+def test_folder_scan_and_photo_date(tmp_path):
+    import pytest
+    pytest.importorskip("PySide6")
+    PIL = pytest.importorskip("PIL")
+    from PIL import Image
+
+    from reelcut.ffmpeg import parse_time
+    from reelcut.gui.panels import media_in_folder
+    from reelcut.photos import shot_time
+
+    (tmp_path / "day2").mkdir()
+    (tmp_path / ".cache").mkdir()
+    for name in ("b.MP4", "day2/a.mov", "note.AAE", ".hidden.mp4", ".cache/x.jpg", "readme.txt"):
+        (tmp_path / name).write_bytes(b"x")
+    im = Image.new("RGB", (8, 8))
+    exif = im.getexif()
+    exif.get_ifd(0x8769)[0x9003] = "2025:03:14 20:30:00"
+    exif.get_ifd(0x8769)[0x9011] = "+09:00"
+    im.save(tmp_path / "photo.jpg", exif=exif.tobytes())
+    found = [p.replace("\\", "/").split(tmp_path.name + "/")[1] for p in media_in_folder(str(tmp_path))]
+    assert found == ["b.MP4", "photo.jpg", "day2/a.mov"]
+    assert shot_time(str(tmp_path / "photo.jpg")) == parse_time("2025-03-14T20:30:00+09:00")
+    assert shot_time(str(tmp_path / "b.MP4")) > 0                     # 날짜 정보가 없으면 파일 시각
+    assert shot_time(str(tmp_path / "b.MP4"), created=123456789.0) == 123456789.0
