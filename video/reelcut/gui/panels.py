@@ -237,6 +237,13 @@ class ClipsPanel(QWidget):
         self.clip_vol.valueChanged.connect(self._on_clip_props)
         self.clip_mute = QCheckBox("음소거")
         self.clip_mute.toggled.connect(self._on_clip_props)
+        self.cut_beats = QComboBox()
+        self.cut_beats.addItem("기본 (음악 탭 설정대로)", 0)
+        for n in (1, 2, 3, 4, 8):
+            self.cut_beats.addItem(f"{n}비트 동안", n)
+        self.cut_beats.setToolTip("비트 맞춤에서 이 클립이 몇 비트 동안 나온 뒤 다음 클립으로 넘어갈지\n"
+                                  "(음악 탭: 자르는 기준 '비트', 클립 고르는 방식 '파일 번갈아' 또는 영상 길이 '클립 개수 × 컷 길이'일 때)")
+        self.cut_beats.currentIndexChanged.connect(self._on_clip_props)
         self.shot_edit = QDateTimeEdit()
         self.shot_edit.setDisplayFormat("yyyy-MM-dd HH:mm")
         self.shot_edit.setCalendarPopup(True)
@@ -248,6 +255,7 @@ class ClipsPanel(QWidget):
         form.addRow("끝", row(self.out_spin, set_out))
         form.addRow("속도", self.speed)
         form.addRow("사진 움직임", self.motion)
+        form.addRow("비트 맞춤 컷", self.cut_beats)
         form.addRow("이 클립 소리", row(self.clip_vol, clip_vol_lbl, self.clip_mute))
         form.addRow("찍은 시각", row(self.shot_edit, self.shot_note, None))
         form.addRow(row(self.clip_info, None, reset))
@@ -291,6 +299,8 @@ class ClipsPanel(QWidget):
             extra += f"  ⏩{c.speed:g}배" if c.speed > 1 else f"  🐢{c.speed:g}배"
         if c.has_audio and c.volume <= 0:
             extra += "  🔇"
+        if c.cut_beats:
+            extra += f"  ♪{c.cut_beats}비트"
         if c.shot_at:
             import time
             unsure = "⚠" if c.shot_source == "file" else ""
@@ -438,6 +448,7 @@ class ClipsPanel(QWidget):
         self.speed.setCurrentIndex(idx)
         self.motion.setEnabled(image)
         self.motion.setCurrentIndex(max(0, self.motion.findData(c.motion)))
+        self.cut_beats.setCurrentIndex(max(0, self.cut_beats.findData(c.cut_beats)))
         self.clip_vol.setEnabled(c.has_audio and not image)
         self.clip_mute.setEnabled(c.has_audio and not image)
         self.clip_vol.setValue(int(round((c.volume if c.volume > 0 else 1.0) * 100)))
@@ -482,6 +493,7 @@ class ClipsPanel(QWidget):
             return
         c.speed = float(self.speed.currentData())
         c.motion = self.motion.currentData()
+        c.cut_beats = int(self.cut_beats.currentData())
         c.volume = 0.0 if self.clip_mute.isChecked() else self.clip_vol.value() / 100
         self.clip_vol.setEnabled(c.has_audio and not self.clip_mute.isChecked())
         self._label(self.list.currentItem())
@@ -767,7 +779,7 @@ class MusicPanel(QWidget):
         self.changed.emit()
 
     def _refresh_info(self) -> None:
-        from ..timeline import build_segments, segment_starts, total_duration
+        from ..timeline import build_segments, segment_starts, total_duration, uses_clip_beats
 
         m = self.project.music
         self.shuffle_btn.setEnabled(self.project.beat_sync.order == "random")
@@ -807,6 +819,8 @@ class MusicPanel(QWidget):
             self.cut_info.setText("클립 탭에서 영상을 추가해 주세요.")
         elif bs.per_clip:
             each = f"{bs.cut_seconds:g}초" if seconds else f"{bs.beats_per_cut}비트"
+            if uses_clip_beats(self.project):
+                each = f"(기본 {bs.beats_per_cut}비트, 클립마다 정한 비트)"
             text = f"클립 {len(usable)}개 × {each} = 완성 길이 {fmt_time(length)}"
             if len(segs) < len(usable):
                 text += f" · 음악이 짧아서 클립 {len(segs)}개까지만 들어가요"
@@ -818,6 +832,11 @@ class MusicPanel(QWidget):
             note = ""
             if not seconds and bs.cut_mode != "regular" and len(m.beat_strengths) != len(m.beats):
                 note = " · 컷 리듬을 쓰려면 '비트 분석'을 다시 눌러 주세요"
+            if uses_clip_beats(self.project):
+                note += " · 클립마다 정한 비트 수 적용 중 (컷 리듬 설정은 안 써요)"
+            elif any(c.cut_beats for c in self.project.clips):
+                note += (" · 클립마다 정한 비트 수는 자르는 기준 '비트' + '파일 번갈아' 또는 "
+                         "'클립 개수 × 컷 길이'에서만 적용돼요")
             self.cut_info.setText(f"컷 {len(segs)}개 · 완성 길이 {fmt_time(length)}{note}")
 
     def pick_music(self) -> None:

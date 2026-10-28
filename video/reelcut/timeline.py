@@ -192,12 +192,42 @@ def beat_sync_active(project: Project) -> bool:
     return bool(project.music.path and project.music.beats)
 
 
-def per_clip_segments(clips: list[Clip], boundaries: list[float], order: str, seed: int) -> list[Segment]:
-    """클립마다 한 컷: k번째 컷 = k번째 클립의 시작 지점부터 (무작위면 순서만 섞음)."""
+def per_clip_order(clips: list[Clip], order: str, seed: int) -> list[Clip]:
+    """'클립 개수 × 컷 길이'에서 클립이 나오는 순서 (무작위면 섞음)."""
     usable = [c for c in clips if c.length > 0.05]
     if order == "random":
         usable = usable[:]
         random.Random(seed).shuffle(usable)
+    return usable
+
+
+def uses_clip_beats(project: Project) -> bool:
+    """클립마다 비트 수를 따로 정한 게 반영되는지 (비트 기준 + 클립 순서가 정해지는 방식일 때만)."""
+    bs = project.beat_sync
+    return (bs.cut_unit == "beats" and (bs.per_clip or bs.order in ("sequential", "spread"))
+            and any(c.cut_beats > 0 for c in project.clips))
+
+
+def clip_beat_marks(anchors: list[float], clip_seq: list[Clip], default: int, end_time: float) -> list[float]:
+    """클립 순서대로 각자 정한 비트 수만큼 지나서 컷 (anchors: 0초 + 비트 시각, 타임라인 기준).
+
+    clip_seq는 돌아가며 반복한다. 비트가 모자라거나 end_time을 넘으면 멈춘다.
+    """
+    marks = []
+    idx, k = 0, 0
+    while clip_seq:
+        n = clip_seq[k % len(clip_seq)].cut_beats or default
+        idx += max(1, n)
+        if idx >= len(anchors) or anchors[idx] >= end_time - 1e-6:
+            break
+        marks.append(anchors[idx])
+        k += 1
+    return marks
+
+
+def per_clip_segments(clips: list[Clip], boundaries: list[float], order: str, seed: int) -> list[Segment]:
+    """클립마다 한 컷: k번째 컷 = k번째 클립의 시작 지점부터 (무작위면 순서만 섞음)."""
+    usable = per_clip_order(clips, order, seed)
     durations = [b - a for a, b in zip(boundaries, boundaries[1:])]
     return [Segment(c.path, c.in_point, d, c.has_audio, c.speed, c.volume, c.motion) for c, d in zip(usable, durations)]
 
@@ -243,7 +273,19 @@ def build_segments(project: Project) -> list[Segment]:
         sel = [beats[i] for i in keep]
         strengths = [music.beat_strengths[i] for i in keep] if len(music.beat_strengths) == len(beats) else None
         energy = [music.beat_energy[i] for i in keep] if len(music.beat_energy) == len(beats) else None
-        picked = pick_cut_beats(sel, bs.beats_per_cut, bs.cut_mode, strengths, energy)
+        if uses_clip_beats(project):
+            # 클립마다 비트 수가 다름: 클립 순서대로 각자 정한 비트만큼 지나서 다음 클립으로
+            seq = per_clip_order(usable, bs.order, bs.seed) if bs.per_clip else usable
+            anchors = [0.0] + [b - music.start for b in sel if b - music.start > 1e-3]
+            marks = clip_beat_marks(anchors, seq, bs.beats_per_cut, end_time)
+            if bs.per_clip:
+                # 클립마다 한 번씩: 마지막 클립의 비트가 끝나는 곳에서 영상도 끝
+                marks = marks[:len(seq)]
+                if len(marks) == len(seq):
+                    end_time = marks[-1]
+            picked = [m + music.start for m in marks]
+        else:
+            picked = pick_cut_beats(sel, bs.beats_per_cut, bs.cut_mode, strengths, energy)
         bounds = cut_boundaries(picked, music.start, 1, end_time, fps)
 
     if bs.per_clip:

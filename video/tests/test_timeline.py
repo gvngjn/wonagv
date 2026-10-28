@@ -168,3 +168,27 @@ def test_month_titles_follow_shot_dates():
     # 1월은 0초, 3월은 5초(다음 달이 0.5초 뒤라 거기서 끝), 4월은 5.5초, 날짜 없는 클립은 무시
     assert got == [(0.0, 1.2, "JANUARY"), (5.0, 5.5, "MARCH"), (5.5, 6.7, "APRIL")]
     assert [e.text for e in month_titles(p, "ko")] == ["1월", "3월", "4월"]
+
+
+def test_each_clip_its_own_beat_count():
+    from reelcut.project import BeatSyncSettings, Clip, MusicSettings, Project
+    from reelcut.timeline import build_segments, segment_starts
+
+    beats = [i * 0.5 for i in range(0, 200)]                 # 120 BPM, 0초부터 비트
+    clips = [Clip("a.mp4", 60, cut_beats=1), Clip("b.mp4", 60, cut_beats=2), Clip("c.mp4", 60)]   # c = 기본(4비트)
+    p = Project(clips=clips, music=MusicSettings("m.mp3", 100.0, beats=beats))
+    p.export.fps = 30
+    p.beat_sync = BeatSyncSettings(enabled=True, beats_per_cut=4, per_clip=True)
+    segs = build_segments(p)
+    assert [s.path for s in segs] == ["a.mp4", "b.mp4", "c.mp4"]
+    assert [round(s.duration, 3) for s in segs] == [0.5, 1.0, 2.0]      # 1비트, 2비트, 4비트 → 3.5초에서 끝
+
+    # 파일 번갈아(반복): a 1비트 → b 2비트 → c 4비트 → a 1비트 …
+    p.beat_sync = BeatSyncSettings(enabled=True, beats_per_cut=4, use_music_length=False, max_duration=7.0)
+    segs = build_segments(p)
+    assert [s.path for s in segs][:4] == ["a.mp4", "b.mp4", "c.mp4", "a.mp4"]
+    assert [round(t, 3) for t in segment_starts(segs)][:5] == [0.0, 0.5, 1.5, 3.5, 4.0]
+
+    # 무작위 순서(반복)에서는 클립 순서를 미리 알 수 없어서 전체 설정을 쓴다
+    p.beat_sync.order = "random"
+    assert {round(s.duration, 3) for s in build_segments(p)[:-1]} == {2.0}
