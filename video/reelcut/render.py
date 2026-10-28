@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Callable
 
 from .ffmpeg import FFmpegError, ProcessRunner
-from .project import PipOverlay, Project, Segment, SubtitleSettings
+from .project import PipOverlay, Project, Segment, SubtitleSettings, TitleSettings
 from .subtitles import save_srt
 from .timeline import build_segments
 
@@ -224,14 +224,20 @@ def windows_font_file(family: str) -> str | None:
     return None
 
 
-def prepare_fonts(subs: SubtitleSettings, work: Path) -> str | None:
-    """자막 글꼴 파일을 작업 폴더의 fonts/에 복사. 복사했으면 'fonts' 반환."""
-    candidates = []
-    if subs.font_file and Path(subs.font_file).suffix.lower() in FONT_EXTS and Path(subs.font_file).exists():
-        candidates.append(subs.font_file)
-    else:
-        found = windows_font_file(subs.font_name)
-        if found:
+def prepare_fonts(styles, work: Path) -> str | None:
+    """자막·제목 글꼴 파일을 작업 폴더의 fonts/에 복사. 복사했으면 'fonts' 반환.
+
+    styles: font_name / font_file 속성이 있는 설정 하나 또는 목록.
+    """
+    if not isinstance(styles, (list, tuple)):
+        styles = [styles]
+    candidates: list[str] = []
+    for st in styles:
+        if st.font_file and Path(st.font_file).suffix.lower() in FONT_EXTS and Path(st.font_file).exists():
+            found = st.font_file
+        else:
+            found = windows_font_file(st.font_name)
+        if found and found not in candidates:
             candidates.append(found)
     if not candidates:
         return None
@@ -240,6 +246,49 @@ def prepare_fonts(subs: SubtitleSettings, work: Path) -> str | None:
     for i, f in enumerate(candidates):
         shutil.copy(f, d / f"font{i}{Path(f).suffix.lower()}")
     return "fonts"
+
+
+def _ass_time(t: float) -> str:
+    cs = int(round(max(0.0, t) * 100))
+    h, cs = divmod(cs, 360000)
+    m, cs = divmod(cs, 6000)
+    sec, cs = divmod(cs, 100)
+    return f"{h}:{m:02d}:{sec:02d}.{cs:02d}"
+
+
+def _ass_escape(text: str) -> str:
+    # libass는 역슬래시를 특수 기호로 쓰므로 비슷하게 생긴 전각 문자로 바꾼다
+    return (text.replace("\\", "＼").replace("{", "\\{").replace("}", "\\}")
+            .replace("\r", "").replace("\n", "\\N"))
+
+
+def titles_ass(t: TitleSettings, w: int, h: int) -> str:
+    """제목용 ASS 자막 파일 내용 (화면 크기 그대로를 좌표로 사용)."""
+    size = max(8, int(round(h * t.size / 100)))
+    outline = round(h * t.outline / 100, 1)
+    align = {"top": 8, "center": 5, "bottom": 2}.get(t.position, 5)     # ASS 숫자패드 정렬
+    margin = int(round(h * 0.08))
+    name = t.font_name.replace(",", " ")
+    fade = int(round(max(0.0, t.fade) * 1000))
+    lines = [
+        "[Script Info]", "ScriptType: v4.00+", f"PlayResX: {w}", f"PlayResY: {h}",
+        "WrapStyle: 0", "ScaledBorderAndShadow: yes", "",
+        "[V4+ Styles]",
+        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, "
+        "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, "
+        "Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+        f"Style: Title,{name},{size},{ass_color(t.color)},{ass_color(t.color)},{ass_color(t.outline_color)},"
+        f"&H80000000,{-1 if t.bold else 0},0,0,0,100,100,0,0,1,{outline},{round(outline / 2, 1)},"
+        f"{align},{int(w * 0.05)},{int(w * 0.05)},{margin},1",
+        "", "[Events]",
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+    ]
+    for e in sorted(t.entries, key=lambda x: x.start):
+        if e.end <= e.start or not e.text.strip():
+            continue
+        lines.append(f"Dialogue: 0,{_ass_time(e.start)},{_ass_time(e.end)},Title,,0,0,0,,"
+                     f"{{\\fad({fade},{fade})}}{_ass_escape(e.text.strip())}")
+    return "\n".join(lines) + "\n"
 
 
 def fonts_option(fonts_dir: str | None) -> str:
@@ -281,7 +330,8 @@ def loudness_filter(target: float) -> str:
 
 
 def final_args(project: Project, concat_list: str, total: float, out_path: str,
-               opt: RenderOptions, srt_name: str | None, fonts_dir: str | None = None) -> list[str]:
+               opt: RenderOptions, srt_name: str | None, fonts_dir: str | None = None,
+               titles_name: str | None = None) -> list[str]:
     """2단계 명령 인자. srt_name은 작업 폴더(cwd) 기준 상대 경로."""
     # 조각 경계에서 필터를 다시 시작하지 않게 (다시 시작하면 프레임 번호가 0으로 돌아가 시간이 꼬인다)
     args = ["-reinit_filter", "0", "-f", "concat", "-safe", "0", "-i", concat_list]
@@ -348,6 +398,9 @@ def final_args(project: Project, concat_list: str, total: float, out_path: str,
         style = ass_style(subs).replace("'", "")
         vf.append(f"{base}subtitles={srt_name}:charenc=UTF-8{fonts_option(fonts_dir)}:force_style='{style}'[vsub]")
         base = "[vsub]"
+    if titles_name:
+        vf.append(f"{base}subtitles={titles_name}{fonts_option(fonts_dir)}[vtitle]")
+        base = "[vtitle]"
     vf.append(f"{base}{fade_filters(project.export.fade_in, project.export.fade_out, total, 'v')}"
               f"trim=duration={_num(total)},setpts=PTS-STARTPTS,format=yuv420p[vout]")
 
@@ -508,19 +561,26 @@ class Renderer:
             (work / "list.txt").write_text(concat_list_text(files), encoding="utf-8")
 
             srt_name = None
-            fonts_dir = None
+            titles_name = None
+            font_styles = []
             if project.subtitles.entries:
                 srt_name = "subs.srt"
                 save_srt(work / srt_name, project.subtitles.entries)
                 if project.subtitles.burn_in:
-                    fonts_dir = prepare_fonts(project.subtitles, work)
+                    font_styles.append(project.subtitles)
+            if any(e.text.strip() for e in project.titles.entries):
+                titles_name = "titles.ass"
+                (work / titles_name).write_text(titles_ass(project.titles, opt.width, opt.height),
+                                                encoding="utf-8")
+                font_styles.append(project.titles)
+            fonts_dir = prepare_fonts(font_styles, work) if font_styles else None
 
             out_final = Path(out_path).resolve()
             out_final.parent.mkdir(parents=True, exist_ok=True)
             # 끝까지 성공했을 때만 진짜 이름으로 바꾼다 → 취소·오류 시 깨진 파일이 남거나
             # 같은 이름의 기존 영상이 지워지는 일이 없다
             part = temp_output_path(str(out_final))
-            args = final_args(project, "list.txt", total, str(part), opt, srt_name, fonts_dir)
+            args = final_args(project, "list.txt", total, str(part), opt, srt_name, fonts_dir, titles_name)
             try:
                 self.runner.run(
                     args, lambda t: report(self._w1 + (1 - self._w1) * min(1.0, t / total), "최종 영상 만드는 중"),

@@ -1094,3 +1094,196 @@ class SubtitlePanel(QWidget):
         if 0 <= r < self.table.rowCount() and self.table.item(r, 2) and self.table.item(r, 2).text().strip():
             text = self.table.item(r, 2).text()
         self.sample.set_style(self.project.subtitles, text)
+
+
+# ------------------------------------------------------------------ 제목
+
+class TitlePanel(QWidget):
+    """자막과 별개로 화면에 크게 띄우는 제목 글자."""
+    changed = Signal()
+
+    def __init__(self, project: Project) -> None:
+        super().__init__()
+        self.project = project
+        self._loading = False
+
+        self.table = QTableWidget(0, 3)
+        self.table.setHorizontalHeaderLabels(["시작", "끝", "제목 (줄을 바꾸려면 \\n)"])
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.table.verticalHeader().setVisible(False)
+        self.table.setMinimumHeight(140)
+        self.table.itemChanged.connect(self._on_item_changed)
+        add = QPushButton("＋ 제목 추가")
+        add.clicked.connect(self.add_row)
+        rm = QPushButton("삭제")
+        rm.clicked.connect(self.remove_rows)
+        self.warn = QLabel()
+        self.warn.setStyleSheet("color: #c0392b")
+
+        style = QGroupBox("제목 모양")
+        self.font = QFontComboBox()
+        font_file_btn = QPushButton("글꼴 파일…")
+        font_file_btn.clicked.connect(self.pick_font_file)
+        self.font_file_label = QLabel()
+        self.font_file_label.setStyleSheet("color: gray")
+        self.size_slider = QSlider(Qt.Horizontal)
+        self.size_slider.setRange(3, 25)
+        self.size_lbl = QLabel()
+        self.size_slider.valueChanged.connect(lambda v: self.size_lbl.setText(f"화면 높이의 {v}%"))
+        self.bold = QCheckBox("굵게")
+        self.color_btn = ColorButton("#FFFFFF")
+        self.outline_color_btn = ColorButton("#000000")
+        self.position = QComboBox()
+        for label, key in (("가운데", "center"), ("위", "top"), ("아래", "bottom")):
+            self.position.addItem(label, key)
+        self.fade = QDoubleSpinBox()
+        self.fade.setRange(0, 3)
+        self.fade.setSingleStep(0.1)
+        self.fade.setSuffix(" 초")
+        self.fade.setKeyboardTracking(False)
+        f = QFormLayout(style)
+        f.addRow("글꼴", row(self.font, font_file_btn))
+        f.addRow("", self.font_file_label)
+        f.addRow("크기", row(self.size_slider, self.size_lbl, self.bold))
+        f.addRow("색", row(self.color_btn, QLabel("외곽선"), self.outline_color_btn, None))
+        f.addRow("위치", row(self.position, QLabel("나타나는 시간"), self.fade, None))
+
+        hint = QLabel("영상 위에 큰 글자로 제목을 띄워요 (서서히 나타났다 사라짐). 시간은 완성 영상 기준이에요.")
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: gray")
+
+        lay = QVBoxLayout(self)
+        lay.addWidget(hint)
+        lay.addWidget(row(add, rm, None))
+        lay.addWidget(self.table, 1)
+        lay.addWidget(self.warn)
+        lay.addWidget(style)
+
+        self.font.currentFontChanged.connect(self._on_font_picked)
+        self.size_slider.valueChanged.connect(self._store)
+        self.bold.toggled.connect(self._store)
+        self.position.currentIndexChanged.connect(self._store)
+        self.fade.valueChanged.connect(self._store)
+        for w in (self.color_btn, self.outline_color_btn):
+            w.color_changed.connect(self._store)
+        self.reload()
+
+    def reload(self) -> None:
+        t = self.project.titles
+        self._loading = True
+        if t.font_file:
+            register_font_file(t.font_file)
+        from PySide6.QtGui import QFont
+        self.font.setCurrentFont(QFont(t.font_name))
+        self.size_slider.setValue(int(round(t.size)))
+        self.size_lbl.setText(f"화면 높이의 {int(round(t.size))}%")
+        self.bold.setChecked(t.bold)
+        self.color_btn.set_color(t.color)
+        self.outline_color_btn.set_color(t.outline_color)
+        self.position.setCurrentIndex(max(0, self.position.findData(t.position)))
+        self.fade.setValue(t.fade)
+        self.table.setRowCount(0)
+        for e in sorted(t.entries, key=lambda x: x.start):
+            self._append(e)
+        self._loading = False
+        self._update_font_label()
+        self._validate()
+
+    def _append(self, e) -> None:
+        r = self.table.rowCount()
+        self.table.insertRow(r)
+        self.table.setItem(r, 0, QTableWidgetItem(subs.format_ts(e.start)))
+        self.table.setItem(r, 1, QTableWidgetItem(subs.format_ts(e.end)))
+        self.table.setItem(r, 2, QTableWidgetItem(e.text.replace("\n", "\\n")))
+
+    def _store(self) -> None:
+        if self._loading:
+            return
+        t = self.project.titles
+        t.size = float(self.size_slider.value())
+        t.bold = self.bold.isChecked()
+        t.color = self.color_btn.color
+        t.outline_color = self.outline_color_btn.color
+        t.position = self.position.currentData()
+        t.fade = self.fade.value()
+        self.changed.emit()
+
+    def _on_item_changed(self, _item) -> None:
+        if not self._loading:
+            self._validate()
+            self.changed.emit()
+
+    def _validate(self) -> None:
+        from ..project import TitleEntry
+
+        entries, bad = [], 0
+        self._loading = True
+        for r in range(self.table.rowCount()):
+            items = [self.table.item(r, c) for c in range(3)]
+            try:
+                a = subs.parse_ts(items[0].text())
+                b = subs.parse_ts(items[1].text())
+                ok = b > a
+            except (ValueError, AttributeError):
+                ok = False
+            for it in items[:2]:
+                if it:
+                    it.setBackground(QColor(0, 0, 0, 0) if ok else QColor(255, 120, 120, 90))
+            if ok:
+                text = (items[2].text() if items[2] else "").replace("\\n", "\n")
+                entries.append(TitleEntry(a, b, text))
+            else:
+                bad += 1
+        self._loading = False
+        self.project.titles.entries = entries
+        self.warn.setText(f"시간 형식이 잘못된 줄 {bad}개는 빠져요 (예: 00:00:03,000)." if bad else "")
+
+    def add_row(self) -> None:
+        from ..project import TitleEntry
+
+        last = self.project.titles.entries[-1].end if self.project.titles.entries else 0.0
+        self._loading = True
+        self._append(TitleEntry(last, last + 3.0, "제목을 입력하세요"))
+        self._loading = False
+        self._validate()
+        self.table.editItem(self.table.item(self.table.rowCount() - 1, 2))
+        self.changed.emit()
+
+    def remove_rows(self) -> None:
+        for r in sorted({i.row() for i in self.table.selectedIndexes()}, reverse=True):
+            self.table.removeRow(r)
+        self._validate()
+        self.changed.emit()
+
+    def _on_font_picked(self, font) -> None:
+        if self._loading:
+            return
+        t = self.project.titles
+        t.font_name = font.family()
+        if t.font_file and t.font_name not in font_file_families(t.font_file):
+            t.font_file = ""
+        self._update_font_label()
+        self.changed.emit()
+
+    def pick_font_file(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "글꼴 파일 선택", "", "글꼴 (*.ttf *.otf *.ttc);;모든 파일 (*)")
+        if not path:
+            return
+        families = register_font_file(path)
+        if not families:
+            QMessageBox.warning(self, "글꼴", "글꼴 파일을 읽을 수 없어요.")
+            return
+        t = self.project.titles
+        t.font_file, t.font_name = path, families[0]
+        self._loading = True
+        from PySide6.QtGui import QFont
+        self.font.setCurrentFont(QFont(families[0]))
+        self._loading = False
+        self._update_font_label()
+        self.changed.emit()
+
+    def _update_font_label(self) -> None:
+        f = self.project.titles.font_file
+        self.font_file_label.setText(f"파일 글꼴 사용 중: {Path(f).name}" if f else "설치된 글꼴 사용 중")

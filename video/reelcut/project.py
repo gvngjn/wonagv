@@ -144,6 +144,28 @@ def find_aspect(width: int, height: int) -> tuple[str, str] | None:
 
 
 @dataclass
+class TitleEntry:
+    start: float
+    end: float
+    text: str
+
+
+@dataclass
+class TitleSettings:
+    """자막과 별개인 큰 제목 글자 (서서히 나타났다 사라짐)."""
+    entries: list[TitleEntry] = field(default_factory=list)
+    font_name: str = "Malgun Gothic"
+    font_file: str = ""
+    size: float = 9.0              # 글자 높이 = 화면 높이의 몇 %
+    bold: bool = True
+    color: str = "#FFFFFF"
+    outline_color: str = "#000000"
+    outline: float = 0.6           # 외곽선 두께 = 화면 높이의 몇 %
+    position: str = "center"       # top | center | bottom
+    fade: float = 0.4              # 나타나고 사라지는 시간(초)
+
+
+@dataclass
 class ExportSettings:
     width: int = 1920
     height: int = 1080
@@ -165,6 +187,7 @@ class Project:
     beat_sync: BeatSyncSettings = field(default_factory=BeatSyncSettings)
     pips: list[PipOverlay] = field(default_factory=list)
     subtitles: SubtitleSettings = field(default_factory=SubtitleSettings)
+    titles: TitleSettings = field(default_factory=TitleSettings)
     export: ExportSettings = field(default_factory=ExportSettings)
 
     # ---- 파일 확인 / 다시 연결 ----
@@ -176,6 +199,8 @@ class Project:
             refs.append(("음악", self.music, "path"))
         if self.subtitles.font_file:
             refs.append(("글꼴", self.subtitles, "font_file"))
+        if self.titles.font_file:
+            refs.append(("제목 글꼴", self.titles, "font_file"))
         return refs
 
     def missing_files(self) -> list[str]:
@@ -234,6 +259,9 @@ class Project:
         subs = d.get("subtitles") or {}
         p.subtitles = build(SubtitleSettings, {k: v for k, v in subs.items() if k != "entries"})
         p.subtitles.entries = [build(SubtitleEntry, e) for e in subs.get("entries", [])]
+        titles = d.get("titles") or {}
+        p.titles = build(TitleSettings, {k: v for k, v in titles.items() if k != "entries"})
+        p.titles.entries = [build(TitleEntry, e) for e in titles.get("entries", [])]
         p.export = build(ExportSettings, d.get("export"))
         return p
 

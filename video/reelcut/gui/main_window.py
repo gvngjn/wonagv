@@ -20,7 +20,7 @@ from .. import __version__, autosave
 from ..textfmt import eta_text
 from ..project import ASPECTS, Project, find_aspect
 from .audio_devices import AudioDeviceManager, AudioOutputPicker
-from .panels import ClipsPanel, MusicPanel, PipPanel, SubtitlePanel, fmt_time
+from .panels import ClipsPanel, MusicPanel, PipPanel, SubtitlePanel, TitlePanel, fmt_time
 from .panels import row as row_widget
 from .workers import TaskThread
 
@@ -135,6 +135,7 @@ class MainWindow(QMainWindow):
         self.music = MusicPanel(self.project)
         self.pips = PipPanel(self.project)
         self.subs = SubtitlePanel(self.project)
+        self.titles = TitlePanel(self.project)
 
         self.tabs = QTabWidget()
         self.tabs.addTab(self.clips, "🎬 클립 이어붙이기")
@@ -149,8 +150,13 @@ class MainWindow(QMainWindow):
         subs_scroll.setFrameShape(QScrollArea.NoFrame)
         subs_scroll.setWidget(self.subs)
         self.tabs.addTab(subs_scroll, "💬 자막")
+        titles_scroll = QScrollArea()
+        titles_scroll.setWidgetResizable(True)
+        titles_scroll.setFrameShape(QScrollArea.NoFrame)
+        titles_scroll.setWidget(self.titles)
+        self.tabs.addTab(titles_scroll, "🔤 제목")
 
-        for panel in (self.clips, self.music, self.pips, self.subs):
+        for panel in (self.clips, self.music, self.pips, self.subs, self.titles):
             panel.changed.connect(self._on_changed)
         self.clips.preview_requested.connect(lambda p, s: self.preview.load(p, s))
         self.music.analyze_requested.connect(self.analyze_music)
@@ -344,7 +350,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"{'● ' if self.dirty else ''}{name} — ReelCut 영상 편집기")
 
     def _reload_all(self) -> None:
-        for p in (self.clips, self.music, self.pips, self.subs):
+        for p in (self.clips, self.music, self.pips, self.subs, self.titles):
             p.project = self.project
             p.reload()
         self._load_export_settings()

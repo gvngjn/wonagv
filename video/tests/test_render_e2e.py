@@ -186,3 +186,14 @@ def test_beat_transitions_keep_exact_length(media, tmp_path, transition):
         kind, start, dur = line.split(",")
         assert float(start) == pytest.approx(0, abs=0.01), line
         assert float(dur) == pytest.approx(total, abs=0.05), line
+
+
+@needs_ffmpeg
+def test_render_with_title(media, tmp_path):
+    from reelcut.project import TitleEntry
+
+    p = base_project(media)
+    p.titles.entries = [TitleEntry(0.0, 2.0, "제목 테스트\n두 줄")]
+    out = tmp_path / "title.mp4"
+    Renderer().render(p, str(out), preview=True)
+    assert probe(str(out)).duration == pytest.approx(7.0, abs=0.1)

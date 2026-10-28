@@ -171,3 +171,28 @@ def test_segments_always_same_pixel_format():
         args = segment_args(Segment("v.mp4", 0, 1.0), "o.mkv", RenderOptions(320, 180, 30), tr)
         assert args[args.index("-pix_fmt") + 1] == "yuv420p"
         assert args[args.index("-filter_complex") + 1].count("format=yuv420p[v]") == 1
+
+
+def test_titles_ass_and_roundtrip(tmp_path):
+    from reelcut.project import TitleEntry
+    from reelcut.render import titles_ass
+
+    p = Project()
+    p.titles.entries = [TitleEntry(1.0, 4.5, "제목 {괄호}\n둘째 줄 \\ 끝"), TitleEntry(5, 4, "잘못된 시간")]
+    p.titles.position = "top"
+    ass = titles_ass(p.titles, 1080, 1920)
+    assert "PlayResX: 1080" in ass and "PlayResY: 1920" in ass
+    assert "Style: Title,Malgun Gothic,173," in ass           # 1920 * 9%
+    assert ",8,54,54,154,1" in ass                              # 위쪽 정렬, 여백
+    assert "0:00:01.00,0:00:04.50" in ass
+    assert "{\\fad(400,400)}제목 \\{괄호\\}\\N둘째 줄 ＼ 끝" in ass
+    assert "잘못된 시간" not in ass
+    path = tmp_path / "p.json"
+    p.save(path)
+    assert Project.load(path).titles.entries[0].text == "제목 {괄호}\n둘째 줄 \\ 끝"
+
+
+def test_final_args_with_titles():
+    p = Project()
+    args = final_args(p, "list.txt", 5.0, "o.mp4", RenderOptions(640, 360, 30), None, "fonts", "titles.ass")
+    assert "subtitles=titles.ass:fontsdir=fonts[vtitle]" in args[args.index("-filter_complex") + 1]
