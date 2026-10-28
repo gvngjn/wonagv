@@ -21,6 +21,7 @@ from ..history import History
 from ..textfmt import eta_text
 from ..project import ASPECTS, Project, find_aspect
 from .audio_devices import AudioDeviceManager, AudioOutputPicker
+from .timeline_bar import TimelineBar
 from .panels import ClipsPanel, MusicPanel, PipPanel, SubtitlePanel, TitlePanel, fmt_time
 from .panels import row as row_widget
 from .workers import TaskThread
@@ -192,6 +193,9 @@ class MainWindow(QMainWindow):
         right = QWidget()
         rl = QVBoxLayout(right)
         rl.addWidget(self.preview, 1)
+        self.timeline = TimelineBar()
+        self.timeline.clip_clicked.connect(self._select_clip)
+        rl.addWidget(self.timeline)
         rl.addWidget(self._build_export_box())
 
         split = QSplitter()
@@ -217,6 +221,11 @@ class MainWindow(QMainWindow):
         self._history_timer.setInterval(400)
         self._history_timer.timeout.connect(self._record_history)
         self._reset_history()
+        self._timeline_timer = QTimer(self)
+        self._timeline_timer.setSingleShot(True)
+        self._timeline_timer.setInterval(150)
+        self._timeline_timer.timeout.connect(self._refresh_timeline)
+        self._refresh_timeline()
 
     # ---------------------------------------------------------------- UI 구성
     def _build_menu(self) -> None:
@@ -384,7 +393,17 @@ class MainWindow(QMainWindow):
         self.size_label.setText(f"{name} · {ex.width}×{ex.height}")
 
     # ---------------------------------------------------------------- 상태
+    def _select_clip(self, k: int) -> None:
+        self.tabs.setCurrentIndex(0)
+        if 0 <= k < self.clips.list.count():
+            self.clips.list.setCurrentRow(k)
+
+    def _refresh_timeline(self) -> None:
+        self.timeline.set_project(self.project)
+
     def _on_changed(self) -> None:
+        if hasattr(self, "_timeline_timer"):
+            self._timeline_timer.start()
         self.dirty = True
         self._update_title()
         self._autosave_timer.start()
@@ -401,6 +420,8 @@ class MainWindow(QMainWindow):
         for p in (self.clips, self.music, self.pips, self.subs, self.titles):
             p.project = self.project
             p.reload()
+        if hasattr(self, "timeline"):
+            self._refresh_timeline()
         self._load_export_settings()
         self._update_title()
 
