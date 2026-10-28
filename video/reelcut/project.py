@@ -163,6 +163,50 @@ class Project:
     subtitles: SubtitleSettings = field(default_factory=SubtitleSettings)
     export: ExportSettings = field(default_factory=ExportSettings)
 
+    # ---- 파일 확인 / 다시 연결 ----
+    def media_refs(self) -> list[tuple[str, object, str]]:
+        """(종류, 객체, 속성 이름) — 프로젝트가 쓰는 모든 외부 파일."""
+        refs: list[tuple[str, object, str]] = [("클립", c, "path") for c in self.clips]
+        refs += [("화면 속 화면", p, "path") for p in self.pips]
+        if self.music.path:
+            refs.append(("음악", self.music, "path"))
+        if self.subtitles.font_file:
+            refs.append(("글꼴", self.subtitles, "font_file"))
+        return refs
+
+    def missing_files(self) -> list[str]:
+        out = []
+        for _kind, obj, attr in self.media_refs():
+            path = getattr(obj, attr)
+            if path and not Path(path).exists() and path not in out:
+                out.append(path)
+        return out
+
+    def relink(self, folder: str | Path, max_files: int = 200_000) -> int:
+        """없어진 파일을 folder 안(하위 폴더 포함)에서 같은 이름으로 찾아 경로를 고친다. 고친 개수."""
+        wanted = {Path(p).name.lower() for p in self.missing_files()}
+        if not wanted:
+            return 0
+        found: dict[str, str] = {}
+        seen = 0
+        for root, _dirs, files in os.walk(folder):
+            for f in files:
+                seen += 1
+                key = f.lower()
+                if key in wanted and key not in found:
+                    found[key] = str(Path(root) / f)
+            if len(found) == len(wanted) or seen > max_files:
+                break
+        fixed = 0
+        for _kind, obj, attr in self.media_refs():
+            path = getattr(obj, attr)
+            if path and not Path(path).exists():
+                new = found.get(Path(path).name.lower())
+                if new:
+                    setattr(obj, attr, new)
+                    fixed += 1
+        return fixed
+
     # ---- 저장 / 불러오기 ----
     def to_dict(self) -> dict:
         return asdict(self)

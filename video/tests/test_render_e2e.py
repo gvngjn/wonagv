@@ -124,3 +124,35 @@ def test_cancel_stops_parallel_render(media, tmp_path):
     assert not t.is_alive()
     assert err and isinstance(err[0], Cancelled)
     assert not (tmp_path / "x.mp4").exists()
+
+
+@needs_ffmpeg
+def test_cancel_during_final_stage_keeps_existing_output(media, tmp_path):
+    from reelcut.ffmpeg import Cancelled
+    from reelcut.render import temp_output_path
+
+    out = tmp_path / "완성 영상.mp4"
+    out.write_bytes(b"old good video")
+    p = base_project(media)
+    r = Renderer(workers=2)
+
+    def progress(f, m):
+        if f > 0.55:
+            r.cancel()
+
+    with pytest.raises(Cancelled):
+        r.render(p, str(out), on_progress=progress)
+    assert out.read_bytes() == b"old good video"          # 기존 파일 그대로
+    assert not temp_output_path(str(out)).exists()       # 임시 파일 정리
+
+
+@needs_ffmpeg
+def test_missing_file_is_reported_before_rendering(media, tmp_path):
+    from reelcut.render import MissingFilesError
+
+    p = base_project(media)
+    p.clips.append(Clip(str(tmp_path / "사라진 영상.mp4"), 3.0))
+    p.music.path = str(tmp_path / "없는 노래.mp3")
+    with pytest.raises(MissingFilesError) as e:
+        Renderer().render(p, str(tmp_path / "o.mp4"))
+    assert "사라진 영상.mp4" in str(e.value) and "없는 노래.mp3" in str(e.value)

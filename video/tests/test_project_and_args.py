@@ -112,3 +112,25 @@ def test_segment_args_fit_modes():
     assert "force_original_aspect_ratio=increase,crop=1080:1920" in graphs["crop"]
     assert "pad=1080:1920" in graphs["pad"]
     assert all("trim=end_frame=30" in g for g in graphs.values())
+
+
+def test_relink_finds_moved_files(tmp_path):
+    new_dir = tmp_path / "새 폴더" / "하위"
+    new_dir.mkdir(parents=True)
+    (new_dir / "클립A.MP4").write_bytes(b"x")
+    (new_dir / "노래.mp3").write_bytes(b"x")
+    p = Project(clips=[Clip("D:/옛날/클립A.mp4", 3.0), Clip("D:/옛날/없음.mp4", 3.0)])
+    p.music.path = "D:/옛날/노래.mp3"
+    assert len(p.missing_files()) == 3
+    assert p.relink(tmp_path) == 2
+    assert p.clips[0].path == str(new_dir / "클립A.MP4")
+    assert p.music.path == str(new_dir / "노래.mp3")
+    assert p.missing_files() == ["D:/옛날/없음.mp4"]
+
+
+def test_friendly_ffmpeg_messages():
+    from reelcut.ffmpeg import friendly_message
+
+    assert "디스크 공간" in friendly_message("av_interleaved_write_frame(): No space left on device")
+    assert "다른 프로그램" in friendly_message("out.mp4: Permission denied")
+    assert friendly_message("something odd") == ""

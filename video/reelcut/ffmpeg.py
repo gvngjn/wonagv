@@ -19,6 +19,24 @@ class FFmpegError(RuntimeError):
     pass
 
 
+_FRIENDLY = [
+    ("No space left on device", "디스크 공간이 부족해요. 저장할 드라이브의 공간을 비워 주세요."),
+    ("Permission denied", "파일에 쓸 권한이 없거나 다른 프로그램이 파일을 쓰고 있어요. 플레이어를 닫거나 다른 폴더를 골라 주세요."),
+    ("Invalid data found when processing input", "파일이 손상됐거나 지원하지 않는 형식이에요."),
+    ("moov atom not found", "파일이 끝까지 저장되지 않은(손상된) 영상이에요."),
+    ("No such file or directory", "파일을 찾을 수 없어요. 옮기거나 지웠는지 확인해 주세요."),
+    ("Cannot allocate memory", "메모리가 부족해요. 다른 프로그램을 닫거나 해상도를 낮춰 보세요."),
+]
+
+
+def friendly_message(stderr: str) -> str:
+    """ffmpeg 오류 출력에서 흔한 원인을 찾아 쉬운 설명을 돌려준다 (없으면 빈 문자열)."""
+    for needle, msg in _FRIENDLY:
+        if needle in stderr:
+            return msg
+    return ""
+
+
 class Cancelled(Exception):
     """사용자가 작업을 취소했을 때."""
 
@@ -210,4 +228,6 @@ class ProcessRunner:
         if self._cancelled:
             raise Cancelled()
         if proc.returncode != 0:
-            raise FFmpegError("ffmpeg 실행 실패:\n" + "".join(stderr_lines[-25:]))
+            detail = "".join(stderr_lines[-25:])
+            hint = friendly_message(detail)
+            raise FFmpegError((hint + "\n\n[자세한 내용]\n" if hint else "ffmpeg 실행 실패:\n") + detail)

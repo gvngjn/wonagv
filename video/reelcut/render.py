@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from .ffmpeg import ProcessRunner
+from .ffmpeg import FFmpegError, ProcessRunner
 from .project import PipOverlay, Project, Segment, SubtitleSettings
 from .subtitles import save_srt
 from .timeline import build_segments
@@ -335,6 +335,20 @@ def concat_list_text(files: list[str]) -> str:
     return "\n".join(lines) + "\n"
 
 
+class MissingFilesError(FileNotFoundError):
+    def __init__(self, paths: list[str]) -> None:
+        self.paths = paths
+        names = "\n".join(f"· {Path(p).name}" for p in paths[:10])
+        more = f"\n… 외 {len(paths) - 10}개" if len(paths) > 10 else ""
+        super().__init__(f"찾을 수 없는 파일이 있어요 (옮기거나 지웠나요?):\n{names}{more}")
+
+
+def temp_output_path(out_path: str) -> Path:
+    """완성되기 전까지 쓰는 임시 결과 파일 (같은 폴더, 숨김 이름)."""
+    p = Path(out_path)
+    return p.with_name(f".{p.stem}.reelcut-part{p.suffix}")
+
+
 def default_workers() -> int:
     """동시에 돌릴 ffmpeg 수: 코어 절반, 최대 4."""
     return max(1, min(4, (os.cpu_count() or 2) // 2))
@@ -388,7 +402,10 @@ class Renderer:
                 progress[i] = min(seg.duration, t)
                 show()
 
-            runner.run(segment_args(seg, str(out), opt), on_time)
+            try:
+                runner.run(segment_args(seg, str(out), opt), on_time)
+            except FFmpegError as e:
+                raise FFmpegError(f"'{Path(seg.path).name}' 처리 중 문제가 생겼어요.\n{e}") from e
             with lock:
                 progress[i] = seg.duration
                 finished[0] += 1
@@ -410,6 +427,9 @@ class Renderer:
 
     def render(self, project: Project, out_path: str, preview: bool = False,
                on_progress: Callable[[float, str], None] | None = None) -> float:
+        missing = project.missing_files()
+        if missing:
+            raise MissingFilesError(missing)
         segments = build_segments(project)
         if not segments:
             raise ValueError("이어붙일 클립이 없어요. 클립을 추가해 주세요.")
@@ -438,13 +458,26 @@ class Renderer:
                 if project.subtitles.burn_in:
                     fonts_dir = prepare_fonts(project.subtitles, work)
 
-            out_abs = str(Path(out_path).resolve())
-            Path(out_abs).parent.mkdir(parents=True, exist_ok=True)
-            args = final_args(project, "list.txt", total, out_abs, opt, srt_name, fonts_dir)
-            self.runner.run(
-                args, lambda t: report(0.5 + 0.5 * min(1.0, t / total), "최종 영상 만드는 중"),
-                cwd=str(work),
-            )
+            out_final = Path(out_path).resolve()
+            out_final.parent.mkdir(parents=True, exist_ok=True)
+            # 끝까지 성공했을 때만 진짜 이름으로 바꾼다 → 취소·오류 시 깨진 파일이 남거나
+            # 같은 이름의 기존 영상이 지워지는 일이 없다
+            part = temp_output_path(str(out_final))
+            args = final_args(project, "list.txt", total, str(part), opt, srt_name, fonts_dir)
+            try:
+                self.runner.run(
+                    args, lambda t: report(0.5 + 0.5 * min(1.0, t / total), "최종 영상 만드는 중"),
+                    cwd=str(work),
+                )
+                try:
+                    os.replace(part, out_final)
+                except PermissionError as e:
+                    raise PermissionError(
+                        f"'{out_final.name}' 파일이 다른 프로그램에서 열려 있어서 바꿀 수 없어요. "
+                        "플레이어를 닫고 다시 내보내 주세요.") from e
+            finally:
+                if part.exists():
+                    part.unlink(missing_ok=True)
             report(1.0, "완료")
             return total
         finally:

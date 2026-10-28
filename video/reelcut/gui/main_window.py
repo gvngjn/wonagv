@@ -394,7 +394,7 @@ class MainWindow(QMainWindow):
     def load_music_waveform(self) -> None:
         """프로젝트를 열었을 때 파형만 다시 그리기 (비트는 저장돼 있음)."""
         path = self.project.music.path
-        if not path or not Path(path).exists():
+        if not path or not Path(path).exists() or (self.task and self.task.isRunning()):
             return
         from ..beats import load_waveform
 
@@ -469,6 +469,8 @@ class MainWindow(QMainWindow):
 
         if not self.project.clips:
             QMessageBox.information(self, "ReelCut", "클립을 먼저 추가해 주세요.")
+            return
+        if not self.offer_relink():
             return
         bs = self.project.beat_sync
         if bs.enabled and not self.project.music.beats:
@@ -592,10 +594,35 @@ class MainWindow(QMainWindow):
         self.music.stop_preview()
         self.music.set_waveform([])
         self._reload_all()
+        self.offer_relink()
         self.load_music_waveform()
-        missing = [c.path for c in self.project.clips if not Path(c.path).exists()]
-        if missing:
-            QMessageBox.warning(self, "ReelCut", "찾을 수 없는 파일:\n" + "\n".join(missing))
+
+    def offer_relink(self) -> bool:
+        """없어진 파일이 있으면 알려 주고, 폴더를 골라 같은 이름으로 다시 연결. 모두 찾으면 True."""
+        missing = self.project.missing_files()
+        while missing:
+            names = "\n".join(f"· {Path(p).name}" for p in missing[:12])
+            more = f"\n… 외 {len(missing) - 12}개" if len(missing) > 12 else ""
+            box = QMessageBox(self)
+            box.setIcon(QMessageBox.Warning)
+            box.setWindowTitle("찾을 수 없는 파일")
+            box.setText(f"옮기거나 이름을 바꾼 파일이 있어요:\n{names}{more}\n\n"
+                        "파일이 있는 폴더를 고르면 같은 이름으로 찾아서 다시 연결해요.")
+            find = box.addButton("폴더에서 찾기…", QMessageBox.AcceptRole)
+            box.addButton("나중에", QMessageBox.RejectRole)
+            box.exec()
+            if box.clickedButton() is not find:
+                return False
+            folder = QFileDialog.getExistingDirectory(self, "파일이 있는 폴더 고르기")
+            if not folder:
+                return False
+            fixed = self.project.relink(folder)
+            if fixed:
+                self._reload_all()
+                self._on_changed()
+            missing = self.project.missing_files()
+            self.status.setText(f"파일 {fixed}개를 다시 연결했어요." + (f" 아직 {len(missing)}개를 못 찾았어요." if missing else ""))
+        return True
 
     def save_project(self, as_new: bool = False) -> bool:
         path = self.project_path
