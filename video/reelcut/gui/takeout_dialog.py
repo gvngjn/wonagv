@@ -139,7 +139,10 @@ class TakeoutDialog(QDialog):
             return
         finally:
             QApplication.restoreOverrideCursor()
-        self.file_label.setText(f"{Path(path).name} · 기록 {len(self.history.entries):,}개")
+        first, last = self.history.span()
+        day = lambda t: time.strftime("%Y-%m-%d", time.localtime(t))
+        self.file_label.setText(f"{Path(path).name} · 기록 {len(self.history.entries):,}개 · "
+                                f"{day(first)} ~ {day(last)}")
         self.file_label.setStyleSheet("")
         self.year.blockSignals(True)
         self.year.clear()

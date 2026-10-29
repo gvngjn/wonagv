@@ -35,6 +35,11 @@ class Song:
 class History:
     entries: list[dict] = field(default_factory=list)   # 정리한 기록 (시간순 아님)
 
+    def span(self) -> tuple[float, float]:
+        """기록이 있는 기간 (처음, 마지막)."""
+        times = [e["time"] for e in self.entries]
+        return min(times), max(times)
+
     def years(self) -> list[int]:
         return sorted({time.localtime(e["time"]).tm_year for e in self.entries}, reverse=True)
 

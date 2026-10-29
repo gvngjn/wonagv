@@ -45,6 +45,7 @@ def test_titles_and_ids():
 def test_top_songs_of_a_year():
     h = parse_entries(RAW)
     assert h.years() == [2026, 2025]
+    assert h.span()[0] < h.span()[1]
     top = h.top_songs(2026)
     assert [(s.title, s.artist, s.plays) for s in top] == [("Supernova", "aespa", 3), ("Love wins all", "IU", 2)]
     assert top[0].url == "https://music.youtube.com/watch?v=bbb"
