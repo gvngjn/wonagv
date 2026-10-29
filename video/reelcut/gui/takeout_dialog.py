@@ -63,15 +63,15 @@ class TakeoutDialog(QDialog):
         self.search.setPlaceholderText("제목·아티스트 찾기")
         self.search.textChanged.connect(self._filter)
 
-        self.table = QTableWidget(0, 5)
-        self.table.setHorizontalHeaderLabels(["순위", "제목", "아티스트", "재생 수", "마지막으로 들은 날"])
+        self.table = QTableWidget(0, 6)
+        self.table.setHorizontalHeaderLabels(["순위", "제목", "아티스트", "재생 수", "처음 들은 날", "마지막으로 들은 날"])
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setSelectionMode(QTableWidget.SingleSelection)
         hh = self.table.horizontalHeader()
         hh.setSectionResizeMode(1, QHeaderView.Stretch)
-        for c in (0, 2, 3, 4):
+        for c in (0, 2, 3, 4, 5):
             hh.setSectionResizeMode(c, QHeaderView.ResizeToContents)
         self.table.doubleClicked.connect(lambda _i: self.download_selected())
         self.summary = QLabel()
@@ -158,8 +158,9 @@ class TakeoutDialog(QDialog):
         self.songs = self.history.top_songs(self.year.currentData() or None, self.include_yt.isChecked())
         self.table.setRowCount(len(self.songs))
         for r, s in enumerate(self.songs):
+            first = time.strftime("%Y-%m-%d", time.localtime(s.first))
             last = time.strftime("%Y-%m-%d", time.localtime(s.last))
-            for c, v in enumerate((r + 1, s.title, s.artist, s.plays, last)):
+            for c, v in enumerate((r + 1, s.title, s.artist, s.plays, first, last)):
                 item = QTableWidgetItem(str(v))
                 if c in (0, 3):
                     item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
