@@ -38,6 +38,10 @@
 - **말할 때 음악 줄이기**(덕킹): 영상 원본·작은 화면에서 말소리가 나오면 음악을 자동으로 줄였다가 다시 키움 (약하게 ≈ 9dB / 보통 ≈ 13dB / 세게 ≈ 18dB)
 - 비트 맞춤을 끄면 음악은 **배경음**으로만 깔림
 
+- **📊 내가 들은 노래**: 구글 테이크아웃의 YouTube 시청 기록을 열면 연도별로 **많이 들은 순** 노래 목록(재생 수·마지막으로 들은 날) → 골라서 바로 mp3로 받아 음악으로 등록, 목록은 CSV로 저장. 창 오른쪽에 테이크아웃 받는 법 안내
+  - 테이크아웃 받는 법: takeout.google.com → 모두 선택 해제 → **YouTube 및 YouTube Music**만 → 여러 형식에서 기록을 **JSON**으로 → 포함된 데이터는 **기록**만 → 내보내기 생성 → 메일로 온 zip을 그대로 열기
+  - 파일은 이 컴퓨터에서만 읽음
+
 > **노래는 어디서 구하나요?** 영상을 올릴 거라면 저작권 걱정 없는 곳을 추천해요:
 > [YouTube 오디오 보관함](https://studio.youtube.com)(유튜브 스튜디오 → 오디오 보관함),
 > [Pixabay Music](https://pixabay.com/music/), [공유마당](https://gongu.copyright.or.kr/), [FreeMusicArchive](https://freemusicarchive.org/).

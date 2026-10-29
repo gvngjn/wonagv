@@ -592,6 +592,9 @@ class MusicPanel(QWidget):
         self.url_edit.returnPressed.connect(self._request_download)
         self.download_btn = QPushButton("⬇ mp3로 받기")
         self.download_btn.clicked.connect(self._request_download)
+        self.history_btn = QPushButton("📊 내가 들은 노래")
+        self.history_btn.setToolTip("구글 테이크아웃 시청 기록에서 그해 많이 들은 노래를 보고 골라서 받아요 (받는 법도 안내)")
+        self.history_btn.clicked.connect(self.open_listening_history)
         url_note = QLabel("받은 mp3는 '음악\\ReelCut' 폴더에 저장돼요. 저작권이 있는 노래는 업로드 시 "
                           "차단·수익 제한될 수 있으니 직접 만든 곡이나 무료 음원을 쓰세요.")
         url_note.setWordWrap(True)
@@ -619,7 +622,7 @@ class MusicPanel(QWidget):
             self.duck.addItem(label, key)
         self.duck.setToolTip("영상 원본·작은 화면에서 말소리가 나오는 동안 음악을 자동으로 줄였다가 다시 키워요")
         mf = QFormLayout(music_box)
-        mf.addRow(row(self.url_edit, self.download_btn))
+        mf.addRow(row(self.url_edit, self.download_btn, self.history_btn))
         mf.addRow(url_note)
         mf.addRow(row(self.file_label, None, pick, clear))
         mf.addRow(self.gauge)
@@ -844,6 +847,17 @@ class MusicPanel(QWidget):
         if path:
             self.music_chosen.emit(path)
 
+    def open_listening_history(self) -> None:
+        from .takeout_dialog import TakeoutDialog
+
+        dlg = TakeoutDialog(self)
+        dlg.download_requested.connect(self._download_from_history)
+        dlg.exec()
+
+    def _download_from_history(self, url: str) -> None:
+        self.url_edit.setText(url)
+        self._request_download()
+
     def _request_download(self) -> None:
         url = self.url_edit.text().strip()
         if not url:
@@ -853,6 +867,7 @@ class MusicPanel(QWidget):
 
     def set_downloading(self, busy: bool) -> None:
         self.download_btn.setEnabled(not busy)
+        self.history_btn.setEnabled(not busy)
         self.url_edit.setEnabled(not busy)
 
     def set_waveform(self, peaks) -> None:
