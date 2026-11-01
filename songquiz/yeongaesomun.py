@@ -9,6 +9,7 @@ build.eds 가 맵을 만든다. worker 는 열을 '순서'로 읽기 때문에 �
 import re
 import shutil
 import subprocess
+import threading
 import sys
 from pathlib import Path
 
@@ -322,14 +323,30 @@ def download_songs(songs, dl_dir, cookies, ffmpeg, window):
     done = 0
     for start, items in todo.items():
         by_name = {name: n for n, _, name in items}
-        cmd = [*ytdlp(), "-f", "bestaudio/best", "--ignore-errors", "--no-playlist",
+        # -t sleep: 곡 사이에 쉬어서 유튜브 '너무 많이 받음' 차단을 피한다
+        cmd = [*ytdlp(), "-t", "sleep", "-f", "bestaudio/best", "--ignore-errors", "--no-playlist",
                "--no-simulate", "--print", "after_move:%(filepath)s", *yt_args, *cookies,
                "-o", str(dl_dir / ("%(id)s_" + str(start) + ".%(ext)s" if ffmpeg else "%(id)s.%(ext)s"))]
         if ffmpeg:
             cmd += ["--ffmpeg-location", ffmpeg,
                     "--download-sections", f"*{start}-{start + window}"]
         cmd += [f"https://www.youtube.com/watch?v={vid}" for _, vid, _ in items]
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                text=True, encoding="utf-8", errors="replace")
+        limited = threading.Event()
+
+        def watch_errors():
+            for err in proc.stderr:
+                if "rate-limit" in err:
+                    # 계속 받으면 남은 곡이 전부 실패로 처리되니 바로 멈춘다
+                    if not limited.is_set():
+                        limited.set()
+                        proc.terminate()
+                    continue
+                sys.stderr.write(err)
+
+        watcher = threading.Thread(target=watch_errors, daemon=True)
+        watcher.start()
         for line in proc.stdout:
             path = Path(line.strip())
             n = by_name.get(path.stem)
@@ -339,6 +356,12 @@ def download_songs(songs, dl_dir, cookies, ffmpeg, window):
                 if done % 10 == 0 or done == total:
                     print(f"  받는 중 {done}/{total}")
         proc.wait()
+        watcher.join(timeout=5)
+        if limited.is_set():
+            sys.exit(f"\n유튜브가 잠깐 다운로드를 막았어요 (너무 많이 받음). 여기까지 {done}곡 받았어요.\n"
+                     "  1시간쯤 뒤에 실행.bat 을 같은 방법으로 다시 실행하세요.\n"
+                     "  받아 둔 곡은 건너뛰고 이어서 받아요. 시트는 아직 바꾸지 않았어요.\n"
+                     "  (songquiz 폴더에 cookies.txt 를 넣어 두면 덜 막혀요)")
     return got
 
 
