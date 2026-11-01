@@ -49,6 +49,18 @@ def option_table(song_count):
     return opts
 
 
+def ytdlp():
+    """yt-dlp 실행 명령. pip 로만 깔려 있고 PATH 에 없어도 되게 파이썬 모듈로 부른다."""
+    try:
+        import yt_dlp  # noqa: F401
+        return [sys.executable, "-m", "yt_dlp"]
+    except ImportError:
+        pass
+    if shutil.which("yt-dlp"):
+        return ["yt-dlp"]
+    sys.exit("yt-dlp 가 없어요. 'py -m pip install yt-dlp' 로 설치해 주세요.")
+
+
 def need(tool):
     if shutil.which(tool) is None:
         sys.exit(f"'{tool}' 를 찾을 수 없어요. 설치 후 PATH 에 추가해 주세요.")
@@ -103,14 +115,13 @@ def cookie_args(args):
 
 
 def import_youtube(url, cookies):
-    need("yt-dlp")
     if url in LIKED and not cookies:
         sys.exit("좋아요 목록은 비공개라 로그인 정보가 필요해요.\n"
                  "  --cookies-from-browser firefox  (또는 chrome, edge)\n"
                  "  --cookies cookies.txt           (브라우저 확장으로 내보낸 쿠키 파일)")
     url = LIKED.get(url, url)
     proc = subprocess.run(
-        ["yt-dlp", "--flat-playlist", "-J", *cookies, url],
+        [*ytdlp(), "--flat-playlist", "-J", *cookies, url],
         capture_output=True, text=True, encoding="utf-8",
     )
     if proc.returncode != 0:
@@ -213,10 +224,9 @@ def download(row, idx, cookies):
     if found:
         return found[0]
     url = row["url"].strip() or f"ytsearch1:{row['artist']} {row['title']} audio"
-    need("yt-dlp")
     print(f"  내려받는 중: {row['artist']} - {row['title']}")
     subprocess.run(
-        ["yt-dlp", "-f", "bestaudio", "--no-playlist", *cookies, "-o", str(CACHE / f"{idx:03d}.%(ext)s"), url],
+        [*ytdlp(), "-f", "bestaudio", "--no-playlist", *cookies, "-o", str(CACHE / f"{idx:03d}.%(ext)s"), url],
         check=True,
     )
     return next(CACHE.glob(f"{idx:03d}.*"))

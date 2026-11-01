@@ -7,7 +7,6 @@ build.eds 가 맵을 만든다. worker 는 열을 '순서'로 읽기 때문에 �
 필요: pip install openpyxl
 """
 import re
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -57,10 +56,9 @@ def resolve_url(url, artist, title):
     if url and not url.startswith("ytsearch"):
         return url
     query = url or f"ytsearch1:{artist} {title} audio"
-    if shutil.which("yt-dlp") is None:
-        sys.exit("유튜브 주소가 없는 곡이 있어서 yt-dlp 로 검색해야 해요. yt-dlp 를 설치해 주세요.")
+    from songquiz import ytdlp
     print(f"  유튜브에서 찾는 중: {artist} - {title}")
-    out = subprocess.run(["yt-dlp", "--print", "webpage_url", "--skip-download", query],
+    out = subprocess.run([*ytdlp(), "--print", "webpage_url", "--skip-download", query],
                          capture_output=True, text=True, encoding="utf-8")
     found = out.stdout.strip().splitlines()
     if out.returncode != 0 or not found:
