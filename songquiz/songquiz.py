@@ -127,18 +127,57 @@ def import_youtube(url, cookies):
     if proc.returncode != 0:
         sys.exit("yt-dlp 오류:\n" + proc.stderr.strip())
     data = json.loads(proc.stdout)
-    rows = []
+    entries = []
     for e in data.get("entries") or [data]:
         if not e:
             continue
-        title, artist = split_youtube_title(e.get("title", ""),
-                                            e.get("uploader") or e.get("channel"))
-        if e.get("artists"):  # 유튜브 뮤직은 가수 정보를 따로 준다
-            artist = e["artists"][0]
         vid = e.get("url") or e.get("id")
         if vid and not vid.startswith("http"):
             vid = f"https://www.youtube.com/watch?v={vid}"
-        rows.append({"title": title, "artist": artist, "answers": "", "url": vid, "start": ""})
+        e["_url"] = vid
+        m = re.search(r"[?&]v=([\w-]{6,})", vid or "")
+        e["_id"] = e.get("id") or (m.group(1) if m else vid)
+        if e["_id"] and re.fullmatch(r"[\w-]{11}", e["_id"]):
+            # music.youtube.com 주소는 연개소문 다운로더가 못 읽을 수 있어서 일반 주소로
+            e["_url"] = f"https://www.youtube.com/watch?v={e['_id']}"
+        entries.append(e)
+
+    # 목록만 빠르게 받을 때 제목이 안 오는 곡은 한 번 더 곡별로 물어본다
+    missing = [e for e in entries if not e.get("title") and e["_url"]]
+    if missing:
+        print(f"  제목이 없는 곡 {len(missing)}개는 하나씩 다시 확인할게요...")
+        proc = subprocess.run(
+            [*ytdlp(), "--skip-download", "--ignore-errors", *cookies,
+             "--print", "%(id)s\t%(title)s\t%(uploader)s\t%(artist)s",
+             *[e["_url"] for e in missing]],
+            capture_output=True, text=True, encoding="utf-8",
+        )
+        info = {}
+        for line in proc.stdout.splitlines():
+            parts = line.split("\t")
+            if len(parts) == 4:
+                info[parts[0]] = parts
+        for e in missing:
+            got = info.get(e["_id"])
+            if got and got[1] not in ("", "NA"):
+                e["title"] = got[1]
+                e["uploader"] = None if got[2] == "NA" else got[2]
+                if got[3] not in ("", "NA"):
+                    e["artists"] = [got[3]]
+
+    rows, skipped = [], 0
+    for e in entries:
+        if not e.get("title") or not e["_url"]:
+            skipped += 1  # 삭제/비공개된 곡
+            continue
+        title, artist = split_youtube_title(e["title"], e.get("uploader") or e.get("channel"))
+        if e.get("artists"):  # 유튜브 뮤직은 가수 정보를 따로 준다
+            artist = e["artists"][0]
+        rows.append({"title": title, "artist": artist, "answers": "", "url": e["_url"], "start": ""})
+    if skipped:
+        print(f"  삭제됐거나 볼 수 없는 곡 {skipped}개는 뺐어요.")
+    if not rows:
+        sys.exit("가져온 곡이 없어요. 좋아요 목록이 비었거나 로그인 정보(cookies.txt)가 만료됐을 수 있어요.")
     return rows
 
 
