@@ -348,11 +348,9 @@ def cmd_build(args):
 def cmd_yeongaesomun(args):
     import yeongaesomun
 
-    sheet = Path(args.sheet)
-    if sheet.is_dir():  # Map 폴더를 줘도 됨
-        sheet = sheet / "sheet.xlsx"
-    if not sheet.exists():
-        sys.exit(f"{sheet} 가 없어요. 연개소문 Map 폴더의 sheet.xlsx 경로를 넣어 주세요.")
+    # 연개소문 폴더, Map 폴더, sheet.xlsx 바로가기, 진짜 sheet.xlsx 아무거나 줘도 됨
+    sheet = yeongaesomun.find_sheet(args.sheet)
+    print(f"시트: {sheet}")
     rows = read_playlist()
     if args.limit:
         rows = rows[: args.limit]
@@ -413,7 +411,7 @@ def main():
 
     p = sub.add_parser("yeongaesomun",
                        help="연개소문 오픈소스의 sheet.xlsx 에 내 플레이리스트 넣기")
-    p.add_argument("sheet", help="연개소문 Map 폴더 또는 그 안의 sheet.xlsx")
+    p.add_argument("sheet", help="연개소문 폴더 (또는 Map 폴더, sheet.xlsx 경로)")
     p.add_argument("--out", help="다른 이름으로 저장 (기본: 덮어쓰기, 원본은 .backup.xlsx 로 백업)")
     p.add_argument("--title-only", action="store_true",
                    help="제목만 정답 (기본: 제목 OR 가수 둘 다 정답)")

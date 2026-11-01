@@ -100,6 +100,31 @@ def song_row(row, chosung, accept_artist, category, default_start):
     }
 
 
+def find_sheet(path):
+    """sheet.xlsx 위치 찾기.
+
+    연개소문 Map 폴더의 sheet.xlsx 는 바로가기(.lnk)이고, 진짜 파일은
+    Worker\\Worker\\bin\\Release\\netcoreapp3.1\\publish\\Data\\sheet.xlsx 에 있다.
+    """
+    path = Path(path)
+    if path.is_file():
+        if path.suffix.lower() == ".lnk":
+            path = path.parent
+        else:
+            return path
+    if not path.is_dir():
+        sys.exit(f"{path} 가 없어요.")
+    for root in (path, path.parent):
+        direct = root / "sheet.xlsx"
+        if direct.is_file():
+            return direct
+        found = sorted(root.glob("Worker/**/Data/sheet.xlsx"))
+        if found:
+            return found[0]
+    sys.exit(f"{path} 근처에서 진짜 sheet.xlsx 를 못 찾았어요. "
+             "Worker\\...\\Data\\sheet.xlsx 경로를 직접 넣어 주세요.")
+
+
 def export(rows, sheet_path, out_path, chosung, accept_artist=True, category=1,
            default_start=45, keep_existing=False):
     try:
@@ -130,20 +155,28 @@ def export(rows, sheet_path, out_path, chosung, accept_artist=True, category=1,
 
     new = [song_row(row, chosung, accept_artist, category, default_start) for row in rows]
 
+    def put(r, c, v):
+        # 예시 곡 링크 칸이 하이퍼링크라서, 값만 바꾸면 옛 주소가 남는다
+        cell = ws.cell(r, c)
+        cell.hyperlink = None
+        cell.value = v
+
     last_old = ws.max_row
     r = header + 1
     for values in kept:
         for c, v in enumerate(values, 1):
-            ws.cell(r, c).value = v
+            put(r, c, v)
         r += 1
     for song in new:
+        for c in range(1, ws.max_column + 1):
+            put(r, c, None)
         for key, c in cols.items():
-            ws.cell(r, c).value = song.get(key)
+            put(r, c, song.get(key))
         r += 1
     last = r - 1
     for rr in range(r, last_old + 1):
         for c in range(1, ws.max_column + 1):
-            ws.cell(rr, c).value = None
+            put(rr, c, None)
 
     # 엑셀 '표'로 되어 있으면 범위를 새 행 수에 맞춘다
     for table in ws.tables.values():

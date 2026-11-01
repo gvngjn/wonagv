@@ -106,7 +106,7 @@ python songquiz.py build --map 베이스맵.scx
 ```bash
 pip install openpyxl
 python songquiz.py import liked --cookies-from-browser firefox   # 플레이리스트 가져오기 (위와 같음)
-python songquiz.py yeongaesomun "C:\연개소문\Map"                # sheet.xlsx 채우기
+python songquiz.py yeongaesomun "C:\연개소문"                    # sheet.xlsx 채우기
 ```
 
 그다음은 연개소문 설명서대로: **엑셀을 닫고** `worker.bat` 실행 → `build.eds` 를 euddraft 로 실행.
@@ -124,6 +124,8 @@ python songquiz.py yeongaesomun "C:\연개소문\Map"                # sheet.xls
 | 시작/종료 시간 | `start` 칸 → `0:52~` (곡 길이는 worker 가 물어보는 '최대 길이') |
 | 힌트 문구 | 가수 초성 (가수도 정답이라서). `--title-only` 면 `가수: 비비` |
 
+- `Map\sheet.xlsx` 는 바로가기라서, 진짜 파일 `Worker\Worker\bin\Release\netcoreapp3.1\publish\Data\sheet.xlsx`
+  를 자동으로 찾아서 고쳐요. 연개소문 폴더, Map 폴더, 바로가기, 진짜 파일 경로 아무거나 넣어도 돼요.
 - 머리글 글자를 보고 열을 찾아서 써요. 연개소문 worker 는 열 **순서**로 읽으니 시트의 열 순서는 바꾸지 마세요.
 - 시트에 있던 오프닝/엔딩 곡은 남기고 예시 곡은 지워요 (`--keep-existing` 로 남기기).
 - 원래 시트는 `sheet.backup.xlsx` 로 백업해요.
