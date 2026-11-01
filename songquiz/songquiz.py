@@ -345,6 +345,30 @@ def cmd_build(args):
     print(f"euddraft 로 {edd} 를 컴파일하면 {out} 이 만들어져요.")
 
 
+def cmd_yeongaesomun(args):
+    import yeongaesomun
+
+    sheet = Path(args.sheet)
+    if sheet.is_dir():  # Map 폴더를 줘도 됨
+        sheet = sheet / "sheet.xlsx"
+    if not sheet.exists():
+        sys.exit(f"{sheet} 가 없어요. 연개소문 Map 폴더의 sheet.xlsx 경로를 넣어 주세요.")
+    rows = read_playlist()
+    if args.limit:
+        rows = rows[: args.limit]
+    out = Path(args.out) if args.out else sheet
+    if out == sheet:
+        backup = sheet.with_name(sheet.stem + ".backup.xlsx")
+        shutil.copy2(sheet, backup)
+        print(f"원래 시트는 {backup} 에 백업했어요.")
+    yeongaesomun.export(rows, sheet, out, chosung,
+                        accept_artist=not args.title_only,
+                        category=args.category,
+                        default_start=args.start,
+                        keep_existing=args.keep_existing)
+    print("\n다음 순서: 엑셀을 닫고 worker.bat 실행 → build.eds 를 euddraft 로 실행")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -386,6 +410,18 @@ def main():
                    help="연령 제한 등으로 받기 실패할 때 로그인된 브라우저 쿠키 사용")
     p.add_argument("--cookies", metavar="FILE", help="Netscape 형식 쿠키 파일")
     p.set_defaults(func=cmd_build)
+
+    p = sub.add_parser("yeongaesomun",
+                       help="연개소문 오픈소스의 sheet.xlsx 에 내 플레이리스트 넣기")
+    p.add_argument("sheet", help="연개소문 Map 폴더 또는 그 안의 sheet.xlsx")
+    p.add_argument("--out", help="다른 이름으로 저장 (기본: 덮어쓰기, 원본은 .backup.xlsx 로 백업)")
+    p.add_argument("--title-only", action="store_true",
+                   help="제목만 정답 (기본: 제목 OR 가수 둘 다 정답)")
+    p.add_argument("--category", type=int, default=1, help="범주 칸에 넣을 값 (main.eps 의 categories_in_sheet 에 있어야 함)")
+    p.add_argument("--start", type=float, default=45, help="start 칸이 비었을 때 시작 지점(초)")
+    p.add_argument("--limit", type=int, help="앞에서부터 최대 몇 곡")
+    p.add_argument("--keep-existing", action="store_true", help="시트에 있던 예시 곡도 남기기")
+    p.set_defaults(func=cmd_yeongaesomun)
 
     args = ap.parse_args()
     args.func(args)
