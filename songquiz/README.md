@@ -49,6 +49,7 @@ python songquiz.py import my_spotify.csv
 | `answers` | 추가로 인정할 정답, `;` 로 구분. 예: `슈퍼샤이;super shy` |
 | `url` | 유튜브 주소. 비우면 `가수 제목` 으로 유튜브 검색 |
 | `start` | 클립 시작 지점(초). 후렴 시작 위치를 넣으면 좋아요. 비우면 `--start` 값 |
+| `difficulty` | 난이도 1~4 (연개소문 '범주'. 게임 시작 때 방장이 넣을 단계를 골라요). 비우면 `--category` 값(기본 1) |
 
 스포티파이 곡은 음원을 직접 받을 수 없어서 유튜브에서 같은 곡을 찾아 받아요.
 엉뚱한 영상이 걸리면 `url` 칸에 직접 주소를 넣어 주세요.
@@ -119,7 +120,7 @@ python songquiz.py yeongaesomun "C:\연개소문"                    # sheet.xls
 | 복수정답 허용 목록 | `answers` 칸 + **가수** (제목 OR 가수 맞히기. 제목만 하려면 `--title-only`) |
 | 초성 힌트용 한글 명칭 | 제목 초성. 영어는 `S____ S__` 처럼 첫 글자만 |
 | 곡 제목 | `가수 - 제목` (정답 공개 때 보여요) |
-| 범주 | 1 (`--category` 로 변경. `main.eps` 의 `categories_in_sheet` 에 있는 값이어야 해요) |
+| 범주 | `difficulty` 칸 값 (난이도). 비면 `--category` 값(기본 1). `main.eps` 의 `categories_in_sheet` 에 있는 값이어야 해요 |
 | 링크 | 유튜브 주소. 스포티파이에서 온 곡처럼 주소가 없으면 yt-dlp 로 찾아서 넣어요 |
 | 시작/종료 시간 | `start` 칸 → `0:52~` (곡 길이는 worker 가 물어보는 '최대 길이') |
 | 힌트 문구 | 가수 초성 (가수도 정답이라서). `--title-only` 면 `가수: 비비` |

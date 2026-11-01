@@ -67,6 +67,16 @@ def resolve_url(url, artist, title):
     return found[0]
 
 
+def difficulty(row, default):
+    v = str(row.get("difficulty") or "").strip()
+    if not v:
+        return default
+    try:
+        return int(float(v))
+    except ValueError:
+        return v
+
+
 def song_row(row, chosung, accept_artist, category, default_start):
     title = row["title"].strip()
     artist = (row.get("artist") or "").strip()
@@ -88,7 +98,8 @@ def song_row(row, chosung, accept_artist, category, default_start):
         # 영어 제목이 통째로 보이지 않게 미리 'S____ S__' 꼴로 가려서 넣는다.
         "chosung": chosung(title),
         "title": f"{artist} - {title}" if artist else title,
-        "category": category,
+        # playlist.csv 의 difficulty 칸 = 연개소문 '범주'. 게임 시작 때 방장이 넣을 단계를 고른다
+        "category": difficulty(row, category),
         "alt": ", ".join(alts),
         "url": resolve_url(row.get("url"), artist, title),
         "unused": False,
@@ -190,6 +201,10 @@ def export(rows, sheet_path, out_path, chosung, accept_artist=True, category=1,
 
     wb.save(out_path)
     print(f"\n오프닝/엔딩 {len(kept)}곡 유지, 내 곡 {len(new)}곡 추가 → {out_path}")
+    counts = {}
+    for song in new:
+        counts[song["category"]] = counts.get(song["category"], 0) + 1
+    print("범주(난이도)별 곡 수: " + ", ".join(f"{k}단계 {v}곡" for k, v in sorted(counts.items(), key=str)))
     no_url = [s["answer"] for s in new if not s["url"]]
     if no_url:
         print(f"! 링크가 비어 있는 곡 {len(no_url)}개: {', '.join(no_url)}")

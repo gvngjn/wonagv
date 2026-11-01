@@ -25,7 +25,7 @@ PLAYLIST = ROOT / "playlist.csv"
 BUILD = ROOT / "build"
 CLIPS = BUILD / "clips"
 CACHE = BUILD / "download"
-FIELDS = ["title", "artist", "answers", "url", "start"]
+FIELDS = ["title", "artist", "answers", "url", "start", "difficulty"]
 
 # chatEvent 한 줄 채팅 최대 78바이트
 MAX_CHAT_BYTES = 78
@@ -474,7 +474,8 @@ def main():
     p.add_argument("--out", help="다른 이름으로 저장 (기본: 덮어쓰기, 원본은 .backup.xlsx 로 백업)")
     p.add_argument("--title-only", action="store_true",
                    help="제목만 정답 (기본: 제목 OR 가수 둘 다 정답)")
-    p.add_argument("--category", type=int, default=1, help="범주 칸에 넣을 값 (main.eps 의 categories_in_sheet 에 있어야 함)")
+    p.add_argument("--category", type=int, default=1,
+                   help="difficulty 칸이 빈 곡의 범주(난이도) 값. main.eps 의 categories_in_sheet 에 있어야 함")
     p.add_argument("--start", type=float, default=45, help="start 칸이 비었을 때 시작 지점(초)")
     p.add_argument("--limit", type=int, help="앞에서부터 최대 몇 곡")
     p.add_argument("--keep-existing", action="store_true", help="시트에 있던 예시 곡도 남기기")
