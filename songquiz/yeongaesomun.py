@@ -116,6 +116,21 @@ def balance(rows, levels):
     return out
 
 
+def has_hangul(text):
+    return any("가" <= ch <= "힣" for ch in text)
+
+
+def chosung_source(title, alts):
+    """초성 힌트를 만들 글자. 일본어 제목처럼 한글도 영어도 아니면
+    복수정답 중 한글 발음(요코소자파리파크에)을 쓴다."""
+    if has_hangul(title) or re.search(r"[A-Za-z]", title):
+        return title
+    for a in alts:
+        if has_hangul(a):
+            return a
+    return title
+
+
 def song_row(row, chosung, accept_artist, category, default_start):
     title = row["title"].strip()
     artist = (row.get("artist") or "").strip()
@@ -142,7 +157,7 @@ def song_row(row, chosung, accept_artist, category, default_start):
         "answer": title,
         # 연개소문은 이 칸의 한글만 초성으로 바꾸고 나머지는 그대로 보여 준다.
         # 영어 제목이 통째로 보이지 않게 미리 'S____ S__' 꼴로 가려서 넣는다.
-        "chosung": chosung(title),
+        "chosung": chosung(chosung_source(title, alts)),
         "title": f"{artist} - {title}" if artist else title,
         # playlist.csv 의 difficulty 칸 = 연개소문 '범주'. 게임 시작 때 방장이 넣을 단계를 고른다
         "category": difficulty(row, category),
