@@ -44,7 +44,7 @@ python songquiz.py import my_spotify.csv
 
 | 칸 | 설명 |
 |---|---|
-| `title` | 정답 (곡 제목). 띄어쓰기 없앤 것, 대/소문자 버전도 자동으로 인정 |
+| `title` | 정답 (곡 제목). 게임에서는 **띄어쓰기 없이** 쳐야 인정 (한글·영어 모두, 대소문자는 상관없음) |
 | `artist` | 가수. 힌트로 나와요 |
 | `answers` | 추가로 인정할 정답, `;` 로 구분. 예: `슈퍼샤이;super shy` |
 | `url` | 유튜브 주소. 비우면 `가수 제목` 으로 유튜브 검색 |
@@ -117,7 +117,7 @@ python songquiz.py yeongaesomun "C:\연개소문"                    # sheet.xls
 | 시트 열 | 넣는 값 |
 |---|---|
 | 정답 | 제목 |
-| 복수정답 허용 목록 | `answers` 칸 + **가수** (제목 OR 가수 맞히기. 제목만 하려면 `--title-only`) |
+| 복수정답 허용 목록 | `answers` 칸 + **가수** (제목 OR 가수 맞히기. 제목만 하려면 `--title-only`). 띄어쓰기 없는 소문자로 넣어요 (`springday`) |
 | 초성 힌트용 한글 명칭 | 제목 초성. 영어는 `S____ S__` 처럼 첫 글자만 |
 | 곡 제목 | `가수 - 제목` (정답 공개 때 보여요) |
 | 범주 | `difficulty` 칸 값 (난이도). 비면 `--category` 값(기본 1). `main.eps` 의 `categories_in_sheet` 에 있는 값이어야 해요 |

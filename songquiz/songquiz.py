@@ -255,8 +255,9 @@ def answer_variants(row):
         a = a.strip()
         if not a:
             continue
-        for v in (a, a.replace(" ", ""), a.lower(), a.lower().replace(" ", ""),
-                  a.upper(), a.upper().replace(" ", "")):
+        # 정답은 띄어쓰기 없이 쳐야 인정 (한글/영어 모두). 대소문자는 상관없음
+        a = re.sub(r"\s+", "", a)
+        for v in (a, a.lower(), a.upper()):
             if v and v not in out:
                 out.append(v)
     return out

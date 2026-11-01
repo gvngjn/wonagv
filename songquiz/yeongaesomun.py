@@ -123,7 +123,14 @@ def song_row(row, chosung, accept_artist, category, default_start):
     if accept_artist and artist:
         alts.append(artist)
     # 쉼표로 나누기 때문에 정답 안의 쉼표는 뺀다
-    alts = [a.replace(",", "") for a in dict.fromkeys(alts) if a != title]
+    # 게임에서는 띄어쓰기 없이 쳐야 정답 (연개소문도 띄어쓰기를 지우고 비교한다).
+    # 시트에도 띄어쓰기 없는 소문자로 넣고, 띄어쓰기만 다른 중복은 합친다.
+    # 쉼표로 나누기 때문에 정답 안의 쉼표도 뺀다.
+    def squash(text):
+        return re.sub(r"\s+", "", text).replace(",", "").lower()
+
+    main = squash(title)
+    alts = [a for a in dict.fromkeys(squash(a) for a in alts) if a and a != main]
     start = row.get("start") or default_start
     if accept_artist:
         # 가수도 정답이라 가수 이름을 그대로 보여 주면 안 됨
