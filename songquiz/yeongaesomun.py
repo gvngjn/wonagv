@@ -7,6 +7,7 @@ build.eds 가 맵을 만든다. worker 는 열을 '순서'로 읽기 때문에 �
 필요: pip install openpyxl
 """
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -165,6 +166,7 @@ def song_row(row, chosung, accept_artist, category, default_start):
         "url": resolve_url(row.get("url"), artist, title),
         "unused": False,
         "time": fmt_time(float(start)) if start not in ("", None) else None,
+        "_start": int(float(start)) if start not in ("", None) else 0,
         "hint": hint,
         "hint2": None,
     }
@@ -240,8 +242,75 @@ def tag_build_eds(path, part, parts):
     print(f"{eds} 의 맵 이름과 출력 파일 이름에 {tag} 를 붙였어요.")
 
 
+def find_ffmpeg(sheet_path):
+    """연개소문 Worker 폴더에 들어 있는 ffmpeg 를 찾는다. 없으면 PATH 의 ffmpeg."""
+    publish = Path(sheet_path).resolve().parent.parent
+    if publish.is_dir():
+        for f in publish.rglob("*"):
+            if f.name.lower() in ("ffmpeg.exe", "ffmpeg") and f.is_file():
+                return str(f)
+    return shutil.which("ffmpeg")
+
+
+def video_id(url):
+    m = re.search(r"(?:[?&]v=|youtu\.be/)([\w-]{11})", url or "")
+    return m.group(1) if m else None
+
+
+def download_songs(songs, dl_dir, cookies, ffmpeg, window):
+    """yt-dlp 로 곡을 미리 받아서 {곡 번호: 파일 경로} 를 돌려준다.
+
+    연개소문 v1.1.2 의 다운로더는 지금 유튜브에서 받질 못해서, 최신 yt-dlp 로
+    받은 파일 경로를 시트에 넣는다 (연개소문은 컴퓨터 안 파일도 받아 준다).
+    ffmpeg 가 있으면 시작 지점부터 window 초만 받아서 빠르고 용량도 작다.
+    """
+    from songquiz import ytdlp
+
+    dl_dir.mkdir(parents=True, exist_ok=True)
+    got, todo = {}, {}
+    for n, song in enumerate(songs):
+        vid = video_id(song["url"])
+        if not vid:
+            continue
+        start = song["_start"] if ffmpeg else 0
+        name = f"{vid}_{start}" if ffmpeg else vid
+        cached = [f for f in dl_dir.glob(name + ".*") if not f.name.endswith((".part", ".ytdl"))]
+        if cached:
+            got[n] = cached[0]
+        else:
+            todo.setdefault(start, []).append((n, vid, name))
+
+    total = sum(len(v) for v in todo.values())
+    if got:
+        print(f"  이미 받아 둔 곡 {len(got)}개는 그대로 써요.")
+    if total:
+        print(f"  {total}곡을 받을게요. 곡이 많으면 오래 걸려요...")
+    done = 0
+    for start, items in todo.items():
+        by_name = {name: n for n, _, name in items}
+        cmd = [*ytdlp(), "-f", "bestaudio/best", "--ignore-errors", "--no-playlist",
+               "--no-simulate", "--print", "after_move:%(filepath)s", *cookies,
+               "-o", str(dl_dir / ("%(id)s_" + str(start) + ".%(ext)s" if ffmpeg else "%(id)s.%(ext)s"))]
+        if ffmpeg:
+            cmd += ["--ffmpeg-location", ffmpeg,
+                    "--download-sections", f"*{start}-{start + window}"]
+        cmd += [f"https://www.youtube.com/watch?v={vid}" for _, vid, _ in items]
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
+        for line in proc.stdout:
+            path = Path(line.strip())
+            n = by_name.get(path.stem)
+            if n is not None:
+                got[n] = path
+                done += 1
+                if done % 10 == 0 or done == total:
+                    print(f"  받는 중 {done}/{total}")
+        proc.wait()
+    return got
+
+
 def export(rows, sheet_path, out_path, chosung, accept_artist=True, category=1,
-           default_start=45, keep_existing=False, levels=0):
+           default_start=45, keep_existing=False, levels=0,
+           download_dir=None, cookies=(), window=60):
     try:
         import openpyxl
         from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
@@ -272,6 +341,23 @@ def export(rows, sheet_path, out_path, chosung, accept_artist=True, category=1,
     if levels:
         rows = balance(rows, levels)
     new = [song_row(row, chosung, accept_artist, category, default_start) for row in rows]
+
+    failed = []
+    if download_dir:
+        ffmpeg = find_ffmpeg(sheet_path)
+        if not ffmpeg:
+            print("! ffmpeg 를 못 찾아서 곡 전체를 받아요 (시간과 용량이 더 들어요).")
+        got = download_songs(new, Path(download_dir), list(cookies), ffmpeg, window)
+        kept_new = []
+        for n, song in enumerate(new):
+            if n not in got:
+                failed.append(song)
+                continue
+            song["url"] = str(Path(got[n]).resolve())
+            if ffmpeg:
+                song["time"] = None  # 이미 시작 지점부터 잘라서 받았음
+            kept_new.append(song)
+        new = kept_new
 
     def put(r, c, v):
         # 예시 곡 링크 칸이 하이퍼링크라서, 값만 바꾸면 옛 주소가 남는다
@@ -313,6 +399,10 @@ def export(rows, sheet_path, out_path, chosung, accept_artist=True, category=1,
     for song in new:
         counts[song["category"]] = counts.get(song["category"], 0) + 1
     print("범주(난이도)별 곡 수: " + ", ".join(f"{k}단계 {v}곡" for k, v in sorted(counts.items(), key=str)))
+    if failed:
+        print(f"\n! 받지 못해서 뺀 곡 {len(failed)}개 (삭제/비공개/지역 제한 영상일 수 있어요):")
+        for song in failed:
+            print(f"   {song['title']}  ({song['url']})")
     no_url = [s["answer"] for s in new if not s["url"]]
     if no_url:
         print(f"! 링크가 비어 있는 곡 {len(no_url)}개: {', '.join(no_url)}")

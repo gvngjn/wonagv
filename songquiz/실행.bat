@@ -60,7 +60,11 @@ echo 연개소문 폴더를 이 창으로 끌어다 놓고 Enter 를 누르세�
 set "Y="
 set /p "Y=연개소문 폴더: "
 if not defined Y goto fail
-py songquiz.py yeongaesomun %Y% %PART%
+set "CK="
+if exist cookies.txt set "CK=--cookies cookies.txt"
+echo.
+echo 연개소문 다운로더가 지금 유튜브에서 못 받아서, 여기서 곡을 미리 받아 둘게요.
+py songquiz.py yeongaesomun %Y% %PART% %CK%
 if errorlevel 1 goto fail
 
 echo.
