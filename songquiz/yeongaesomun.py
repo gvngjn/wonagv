@@ -239,10 +239,11 @@ def tag_build_eds(path, part, parts):
         end = line[len(body):]
         m = re.match(r"(\s*(map_name|output)\s*:\s*)(.*)$", body)
         if m:
-            value = re.sub(r"\s*\[\d+/\d+\]", "", m.group(3))
+            value = re.sub(r"\s*(\[\d+/\d+\]|\(\d+of\d+\))", "", m.group(3))
             if m.group(2) == "output" and "." in value:
+                # 파일 이름에는 / 를 쓸 수 없다 (윈도우 폴더 구분 기호)
                 stem, ext = value.rsplit(".", 1)
-                value = f"{stem.rstrip()} {tag}.{ext}"
+                value = f"{stem.rstrip()} ({part}of{parts}).{ext}"
             else:
                 value = f"{value.rstrip()} {tag}"
             body = m.group(1) + value
