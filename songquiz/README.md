@@ -136,7 +136,8 @@ python songquiz.py yeongaesomun "C:\연개소문"                    # sheet.xls
   (1500곡이면 맵마다 500곡, 단계마다 125곡. 연개소문 범주는 최대 7개라 한 맵 10단계는 안 돼요)
 - **곡은 이 도구가 미리 받아요.** 연개소문 v1.1.2 의 다운로더는 지금 유튜브에서 받지 못해서
   (전부 `has failed. Removing item.`), 최신 yt-dlp 로 `build/audio/` 에 받고 시트 링크 칸에 그 파일 경로를 넣어요.
-  연개소문 Worker 폴더의 ffmpeg 로 시작 지점부터 60초만 받아요 (`--window`). 못 받은 곡은 빼고 목록을 보여 줘요.
+  곡 전체를 받고, 시작 지점부터 자르는 건 연개소문 Worker 가 해요. 못 받은 곡은 빼고 목록을 보여 줘요.
+  (연개소문에 든 ffmpeg 는 옛 버전이라 구간만 받기(`--sections`)는 최신 ffmpeg 가 있을 때만 쓰세요)
   유튜브 주소만 넣으려면 `--no-download`.
 - 시트에 있던 오프닝/엔딩 곡은 남기고 예시 곡은 지워요 (`--keep-existing` 로 남기기).
 - 원래 시트는 `sheet.backup.xlsx` 로 백업해요.

@@ -310,7 +310,7 @@ def download_songs(songs, dl_dir, cookies, ffmpeg, window):
 
 def export(rows, sheet_path, out_path, chosung, accept_artist=True, category=1,
            default_start=45, keep_existing=False, levels=0,
-           download_dir=None, cookies=(), window=60):
+           download_dir=None, cookies=(), window=60, sections=False):
     try:
         import openpyxl
         from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
@@ -344,9 +344,11 @@ def export(rows, sheet_path, out_path, chosung, accept_artist=True, category=1,
 
     failed = []
     if download_dir:
-        ffmpeg = find_ffmpeg(sheet_path)
-        if not ffmpeg:
-            print("! ffmpeg 를 못 찾아서 곡 전체를 받아요 (시간과 용량이 더 들어요).")
+        # 구간만 받기는 ffmpeg 가 필요한데, 연개소문에 든 ffmpeg(2023)는 지금 yt-dlp 와
+        # 안 맞아서 실패한다. 기본은 곡 전체를 받고 자르기는 연개소문 Worker 에 맡긴다.
+        ffmpeg = find_ffmpeg(sheet_path) if sections else None
+        if sections and not ffmpeg:
+            print("! ffmpeg 를 못 찾아서 곡 전체를 받아요.")
         got = download_songs(new, Path(download_dir), list(cookies), ffmpeg, window)
         kept_new = []
         for n, song in enumerate(new):

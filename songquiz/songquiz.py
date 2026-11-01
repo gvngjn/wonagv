@@ -435,7 +435,8 @@ def cmd_yeongaesomun(args):
                         levels=0 if args.no_balance else args.levels,
                         download_dir=None if args.no_download else BUILD / "audio",
                         cookies=cookie_args(args),
-                        window=args.window)
+                        window=args.window,
+                        sections=args.sections)
     if args.part:
         yeongaesomun.tag_build_eds(args.sheet, part, parts)
     print("\n다음 순서: 엑셀을 닫고 worker.bat 실행 → build.eds 를 euddraft 로 실행")
@@ -501,8 +502,10 @@ def main():
                    help="difficulty 칸 값을 그대로 쓰기 (기본: 단계마다 곡 수가 같게 다시 나눔)")
     p.add_argument("--no-download", action="store_true",
                    help="곡을 미리 받지 않고 유튜브 주소만 넣기 (연개소문 다운로더가 받게 둠)")
+    p.add_argument("--sections", action="store_true",
+                   help="곡 전체 대신 시작 지점부터 --window 초만 받기 (최신 ffmpeg 필요)")
     p.add_argument("--window", type=int, default=60,
-                   help="미리 받을 때 시작 지점부터 몇 초를 받을지 (worker 의 '최대 길이' 보다 길게)")
+                   help="--sections 일 때 시작 지점부터 몇 초를 받을지 (worker 의 '최대 길이' 보다 길게)")
     p.add_argument("--cookies-from-browser", metavar="BROWSER", help="로그인된 브라우저 쿠키 사용")
     p.add_argument("--cookies", metavar="FILE", help="Netscape 형식 쿠키 파일")
     p.set_defaults(func=cmd_yeongaesomun)
