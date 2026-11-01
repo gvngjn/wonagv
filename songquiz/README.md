@@ -49,7 +49,7 @@ python songquiz.py import my_spotify.csv
 | `answers` | 추가로 인정할 정답, `;` 로 구분. 예: `슈퍼샤이;super shy` |
 | `url` | 유튜브 주소. 비우면 `가수 제목` 으로 유튜브 검색 |
 | `start` | 클립 시작 지점(초). 후렴 시작 위치를 넣으면 좋아요. 비우면 `--start` 값 |
-| `difficulty` | 난이도 1~4 (연개소문 '범주'. 게임 시작 때 방장이 넣을 단계를 골라요). 비우면 `--category` 값(기본 1) |
+| `difficulty` | 난이도 1~4 (연개소문 '범주'. 게임 시작 때 방장이 넣을 단계를 골라요). 숫자가 작을수록 쉬움 |
 
 스포티파이 곡은 음원을 직접 받을 수 없어서 유튜브에서 같은 곡을 찾아 받아요.
 엉뚱한 영상이 걸리면 `url` 칸에 직접 주소를 넣어 주세요.
@@ -128,6 +128,8 @@ python songquiz.py yeongaesomun "C:\연개소문"                    # sheet.xls
 - `Map\sheet.xlsx` 는 바로가기라서, 진짜 파일 `Worker\Worker\bin\Release\netcoreapp3.1\publish\Data\sheet.xlsx`
   를 자동으로 찾아서 고쳐요. 연개소문 폴더, Map 폴더, 바로가기, 진짜 파일 경로 아무거나 넣어도 돼요.
 - 머리글 글자를 보고 열을 찾아서 써요. 연개소문 worker 는 열 **순서**로 읽으니 시트의 열 순서는 바꾸지 마세요.
+- 난이도는 **단계마다 곡 수가 같게** 다시 나눠요. `difficulty` 숫자 순서(쉬운 → 어려운)는 지키고,
+  한 단계에 몰리면 같은 숫자 안에서 뒤쪽 곡부터 다음 단계로 넘겨요. 칸에 적은 값 그대로 쓰려면 `--no-balance`.
 - 시트에 있던 오프닝/엔딩 곡은 남기고 예시 곡은 지워요 (`--keep-existing` 로 남기기).
 - 원래 시트는 `sheet.backup.xlsx` 로 백업해요.
 

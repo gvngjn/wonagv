@@ -422,7 +422,8 @@ def cmd_yeongaesomun(args):
                         accept_artist=not args.title_only,
                         category=args.category,
                         default_start=args.start,
-                        keep_existing=args.keep_existing)
+                        keep_existing=args.keep_existing,
+                        levels=0 if args.no_balance else args.levels)
     print("\n다음 순서: 엑셀을 닫고 worker.bat 실행 → build.eds 를 euddraft 로 실행")
 
 
@@ -479,6 +480,9 @@ def main():
     p.add_argument("--start", type=float, default=45, help="start 칸이 비었을 때 시작 지점(초)")
     p.add_argument("--limit", type=int, help="앞에서부터 최대 몇 곡")
     p.add_argument("--keep-existing", action="store_true", help="시트에 있던 예시 곡도 남기기")
+    p.add_argument("--levels", type=int, default=4, help="난이도 단계 수 (연개소문 기본 4, 최대 7)")
+    p.add_argument("--no-balance", action="store_true",
+                   help="difficulty 칸 값을 그대로 쓰기 (기본: 단계마다 곡 수가 같게 다시 나눔)")
     p.set_defaults(func=cmd_yeongaesomun)
 
     args = ap.parse_args()

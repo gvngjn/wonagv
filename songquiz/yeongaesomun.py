@@ -77,6 +77,28 @@ def difficulty(row, default):
         return v
 
 
+def balance(rows, levels):
+    """난이도를 단계마다 곡 수가 같게 다시 나눈다.
+
+    difficulty 숫자(작을수록 쉬움)로 줄을 세우고, 같은 숫자끼리는 원래 순서를
+    유지한 채 levels 등분한다. 그래서 '1이 2보다 쉽다'는 순서는 지키면서
+    1단계에 곡이 몰려 있으면 덜 유명한 쪽부터 2단계로 밀려난다.
+    """
+    def key(item):
+        i, row = item
+        try:
+            return float(str(row.get("difficulty") or "").strip()), i
+        except ValueError:
+            return float("inf"), i  # 비어 있으면 맨 뒤(어려움) 쪽
+
+    ranked = sorted(enumerate(rows), key=key)
+    n = len(ranked)
+    out = [dict(r) for r in rows]
+    for pos, (i, _) in enumerate(ranked):
+        out[i]["difficulty"] = pos * levels // n + 1
+    return out
+
+
 def song_row(row, chosung, accept_artist, category, default_start):
     title = row["title"].strip()
     artist = (row.get("artist") or "").strip()
@@ -135,7 +157,7 @@ def find_sheet(path):
 
 
 def export(rows, sheet_path, out_path, chosung, accept_artist=True, category=1,
-           default_start=45, keep_existing=False):
+           default_start=45, keep_existing=False, levels=0):
     try:
         import openpyxl
         from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
@@ -163,6 +185,8 @@ def export(rows, sheet_path, out_path, chosung, accept_artist=True, category=1,
         if keep_existing or is_special:
             kept.append(values)
 
+    if levels:
+        rows = balance(rows, levels)
     new = [song_row(row, chosung, accept_artist, category, default_start) for row in rows]
 
     def put(r, c, v):
