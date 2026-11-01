@@ -9,6 +9,13 @@ if not exist yeongaesomun.py goto nofile
 echo ============================================
 echo  1/2  유튜브 뮤직 '좋아요 표시한 음악' 가져오기
 echo ============================================
+if not exist playlist.csv goto askimport
+echo 이미 받아 둔 playlist.csv 가 있어요.
+set "R="
+set /p "R=좋아요 목록을 다시 받을까요? (y = 다시 받기 / 그냥 Enter = 있는 목록 쓰기): "
+if /i not "%R%"=="y" goto step2
+
+:askimport
 if exist cookies.txt (
     echo 이 폴더의 cookies.txt 로 로그인해서 가져올게요.
     set "COOKIE=--cookies cookies.txt"
@@ -31,6 +38,8 @@ if errorlevel 1 goto fail
 
 echo.
 echo playlist.csv 를 만들었어요. 제목/가수가 이상하면 지금 열어서 고치고 저장하세요.
+
+:step2
 echo.
 echo ============================================
 echo  2/2  연개소문 시트에 넣기

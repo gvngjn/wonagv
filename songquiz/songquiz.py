@@ -86,6 +86,12 @@ def write_playlist(rows):
 
 # ---------------------------------------------------------------- import
 
+def clean_text(text):
+    """안 보이는 제어 문자(줄바꿈, 탭 등)를 빼고 공백을 정리한다."""
+    text = re.sub(r"[\x00-\x1f\x7f]", " ", text or "")
+    return re.sub(r"\s+", " ", text).strip()
+
+
 def split_youtube_title(raw, uploader):
     """'가수 - 제목 (Official MV)' 꼴을 최대한 나눠 본다. 틀리면 CSV 에서 고치면 됨."""
     t = re.sub(r"[\(\[](official|m/?v|music video|lyrics?|audio|가사|공식)[^\)\]]*[\)\]]", "",
@@ -173,6 +179,10 @@ def import_youtube(url, cookies):
         title, artist = split_youtube_title(e["title"], e.get("uploader") or e.get("channel"))
         if e.get("artists"):  # 유튜브 뮤직은 가수 정보를 따로 준다
             artist = e["artists"][0]
+        title, artist = clean_text(title), clean_text(artist)
+        if not title:
+            skipped += 1
+            continue
         rows.append({"title": title, "artist": artist, "answers": "", "url": e["_url"], "start": ""})
     if skipped:
         print(f"  삭제됐거나 볼 수 없는 곡 {skipped}개는 뺐어요.")

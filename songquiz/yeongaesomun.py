@@ -127,6 +127,7 @@ def export(rows, sheet_path, out_path, chosung, accept_artist=True, category=1,
            default_start=45, keep_existing=False):
     try:
         import openpyxl
+        from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
     except ImportError:
         sys.exit("openpyxl 이 필요해요: pip install openpyxl")
 
@@ -157,6 +158,9 @@ def export(rows, sheet_path, out_path, chosung, accept_artist=True, category=1,
         # 예시 곡 링크 칸이 하이퍼링크라서, 값만 바꾸면 옛 주소가 남는다
         cell = ws.cell(r, c)
         cell.hyperlink = None
+        if isinstance(v, str):
+            # 유튜브 제목에 섞인 안 보이는 제어 문자는 엑셀에 못 넣는다
+            v = ILLEGAL_CHARACTERS_RE.sub("", v)
         cell.value = v
 
     last_old = ws.max_row
