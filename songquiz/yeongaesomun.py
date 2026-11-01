@@ -382,11 +382,17 @@ def download_songs(songs, dl_dir, cookies, ffmpeg, window, cached_only=False):
         proc.wait()
         watcher.join(timeout=5)
         if limited.is_set():
-            sys.exit(f"\n유튜브가 잠깐 다운로드를 막았어요 (너무 많이 받음). 여기까지 {done}곡 받았어요.\n"
-                     "  1시간쯤 뒤에 실행.bat 을 같은 방법으로 다시 실행하세요.\n"
-                     "  받아 둔 곡은 건너뛰고 이어서 받아요. 시트는 아직 바꾸지 않았어요.\n"
-                     "  (songquiz 폴더에 cookies.txt 를 넣어 두면 덜 막혀요)")
+            raise RateLimited(done)
     return got
+
+
+class RateLimited(Exception):
+    """유튜브가 '너무 많이 받음' 으로 잠깐 막았을 때."""
+
+
+RATE_LIMIT_HELP = ("  1시간쯤 뒤에 실행.bat 을 같은 방법으로 다시 실행하세요.\n"
+                   "  받아 둔 곡은 건너뛰고 이어서 받아요.\n"
+                   "  (songquiz 폴더에 cookies.txt 를 넣어 두면 덜 막혀요)")
 
 
 def export(rows, sheet_path, out_path, chosung, accept_artist=True, category=1,
@@ -430,7 +436,11 @@ def export(rows, sheet_path, out_path, chosung, accept_artist=True, category=1,
         ffmpeg = find_ffmpeg(sheet_path) if sections else None
         if sections and not ffmpeg:
             print("! ffmpeg 를 못 찾아서 곡 전체를 받아요.")
-        got = download_songs(new, Path(download_dir), list(cookies), ffmpeg, window, cached_only)
+        try:
+            got = download_songs(new, Path(download_dir), list(cookies), ffmpeg, window, cached_only)
+        except RateLimited as e:
+            sys.exit(f"\n유튜브가 잠깐 다운로드를 막았어요 (너무 많이 받음). 이번에 {e.args[0]}곡 받았어요.\n"
+                     + RATE_LIMIT_HELP + "\n  시트는 아직 바꾸지 않았어요.")
         kept_new = []
         for n, song in enumerate(new):
             if n not in got:
@@ -458,12 +468,22 @@ def export(rows, sheet_path, out_path, chosung, accept_artist=True, category=1,
                        if isinstance(v[ci], str) and video_id(v[ci])]
             if special:
                 print(f"  오프닝/엔딩 곡 {len(special)}개도 받아 둘게요.")
-                got_sp = download_songs(special, Path(download_dir), list(cookies), None, window)
+                try:
+                    got_sp = download_songs(special, Path(download_dir), list(cookies), None, window)
+                except (RateLimited, SystemExit):
+                    got_sp = {}
+                    print("  ! 유튜브가 막아서 오프닝/엔딩 곡은 지금 못 받았어요.")
+                ti = cols["time"] - 1 if "time" in cols else None
                 for n, sp in enumerate(special):
                     if n in got_sp:
                         sp["_row"][ci] = str(Path(got_sp[n]).resolve())
-                    else:
-                        print(f"  ! 오프닝/엔딩 곡을 못 받았어요: {sp['url']}")
+                    elif new:
+                        # 오프닝/엔딩이 빠지면 맵이 이상해질 수 있어서, 받아 둔 문제 곡으로 임시 대체
+                        sp["_row"][ci] = new[n % len(new)]["url"]
+                        if ti is not None:
+                            sp["_row"][ti] = None
+                        print(f"  → 임시로 '{new[n % len(new)]['title']}' 를 오프닝/엔딩으로 써요. "
+                              "나중에 다시 실행하면 원래 곡으로 바뀌어요.")
 
     def put(r, c, v):
         # 예시 곡 링크 칸이 하이퍼링크라서, 값만 바꾸면 옛 주소가 남는다
