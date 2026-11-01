@@ -62,6 +62,9 @@ set /p "Y=연개소문 폴더: "
 if not defined Y goto fail
 set "CK="
 if exist cookies.txt set "CK=--cookies cookies.txt"
+set "C="
+set /p "C=지금까지 받아 둔 곡만으로 만들까요? (y = 받아 둔 곡만 / 그냥 Enter = 남은 곡도 받기): "
+if /i "%C%"=="y" set "CK=%CK% --cached-only"
 echo.
 echo 연개소문 다운로더가 지금 유튜브에서 못 받아서, 여기서 곡을 미리 받아 둘게요.
 py songquiz.py yeongaesomun %Y% %PART% %CK%

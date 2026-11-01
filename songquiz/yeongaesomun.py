@@ -291,7 +291,7 @@ def video_id(url):
     return m.group(1) if m else None
 
 
-def download_songs(songs, dl_dir, cookies, ffmpeg, window):
+def download_songs(songs, dl_dir, cookies, ffmpeg, window, cached_only=False):
     """yt-dlp 로 곡을 미리 받아서 {곡 번호: 파일 경로} 를 돌려준다.
 
     연개소문 v1.1.2 의 다운로더는 지금 유튜브에서 받질 못해서, 최신 yt-dlp 로
@@ -300,7 +300,7 @@ def download_songs(songs, dl_dir, cookies, ffmpeg, window):
     """
     from songquiz import ytdlp
 
-    yt_args = ytdlp_youtube_args()
+    yt_args = [] if cached_only else ytdlp_youtube_args()
     dl_dir.mkdir(parents=True, exist_ok=True)
     got, todo = {}, {}
     for n, song in enumerate(songs):
@@ -315,6 +315,8 @@ def download_songs(songs, dl_dir, cookies, ffmpeg, window):
         else:
             todo.setdefault(start, []).append((n, vid, name))
 
+    if cached_only:
+        todo = {}
     total = sum(len(v) for v in todo.values())
     if got:
         print(f"  이미 받아 둔 곡 {len(got)}개는 그대로 써요.")
@@ -367,7 +369,7 @@ def download_songs(songs, dl_dir, cookies, ffmpeg, window):
 
 def export(rows, sheet_path, out_path, chosung, accept_artist=True, category=1,
            default_start=45, keep_existing=False, levels=0,
-           download_dir=None, cookies=(), window=60, sections=False):
+           download_dir=None, cookies=(), window=60, sections=False, cached_only=False):
     try:
         import openpyxl
         from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
@@ -406,7 +408,7 @@ def export(rows, sheet_path, out_path, chosung, accept_artist=True, category=1,
         ffmpeg = find_ffmpeg(sheet_path) if sections else None
         if sections and not ffmpeg:
             print("! ffmpeg 를 못 찾아서 곡 전체를 받아요.")
-        got = download_songs(new, Path(download_dir), list(cookies), ffmpeg, window)
+        got = download_songs(new, Path(download_dir), list(cookies), ffmpeg, window, cached_only)
         kept_new = []
         for n, song in enumerate(new):
             if n not in got:

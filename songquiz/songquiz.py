@@ -422,6 +422,17 @@ def cmd_yeongaesomun(args):
             sys.exit("--part 는 1/3 처럼 '몇 번째/몇 개' 로 넣어 주세요.")
         rows = yeongaesomun.split_part(rows, part, parts)
         print(f"맵 {part}/{parts}: 쉬운 순으로 {parts}등분한 것 중 {part}번째, {len(rows)}곡")
+    if args.cached_only:
+        # 새로 받지 않고 이미 받아 둔 곡만으로 만들기 (테스트용, 유튜브 차단 중일 때)
+        audio = BUILD / "audio"
+        def cached(row):
+            vid = yeongaesomun.video_id(row.get("url"))
+            return vid and any(not f.name.endswith((".part", ".ytdl")) for f in audio.glob(vid + ".*"))
+        total = len(rows)
+        rows = [r for r in rows if cached(r)]
+        print(f"받아 둔 곡만 써요: {total}곡 중 {len(rows)}곡")
+        if not rows:
+            sys.exit("받아 둔 곡이 없어요.")
     out = Path(args.out) if args.out else sheet
     if out == sheet:
         backup = sheet.with_name(sheet.stem + ".backup.xlsx")
@@ -436,7 +447,8 @@ def cmd_yeongaesomun(args):
                         download_dir=None if args.no_download else BUILD / "audio",
                         cookies=cookie_args(args),
                         window=args.window,
-                        sections=args.sections)
+                        sections=args.sections,
+                        cached_only=args.cached_only)
     if args.part:
         yeongaesomun.tag_build_eds(args.sheet, part, parts)
     print("\n다음 순서: 엑셀을 닫고 worker.bat 실행 → build.eds 를 euddraft 로 실행")
@@ -500,6 +512,8 @@ def main():
     p.add_argument("--levels", type=int, default=4, help="난이도 단계 수 (연개소문 기본 4, 최대 7)")
     p.add_argument("--no-balance", action="store_true",
                    help="difficulty 칸 값을 그대로 쓰기 (기본: 단계마다 곡 수가 같게 다시 나눔)")
+    p.add_argument("--cached-only", action="store_true",
+                   help="새로 받지 않고 이미 받아 둔 곡만으로 시트 만들기")
     p.add_argument("--no-download", action="store_true",
                    help="곡을 미리 받지 않고 유튜브 주소만 넣기 (연개소문 다운로더가 받게 둠)")
     p.add_argument("--sections", action="store_true",
