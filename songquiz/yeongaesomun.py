@@ -251,14 +251,28 @@ def tag_build_eds(path, part, parts):
     print(f"{eds} 의 맵 이름과 출력 파일 이름에 {tag} 를 붙였어요.")
 
 
-def find_ffmpeg(sheet_path):
-    """연개소문 Worker 폴더에 들어 있는 ffmpeg 를 찾는다. 없으면 PATH 의 ffmpeg."""
+def find_tool(sheet_path, name):
+    """연개소문 Worker 폴더에 들어 있는 ffmpeg/ffprobe 를 찾는다. 없으면 PATH 에서."""
     publish = Path(sheet_path).resolve().parent.parent
     if publish.is_dir():
         for f in publish.rglob("*"):
-            if f.name.lower() in ("ffmpeg.exe", "ffmpeg") and f.is_file():
+            if f.name.lower() in (name + ".exe", name) and f.is_file():
                 return str(f)
-    return shutil.which("ffmpeg")
+    return shutil.which(name)
+
+
+def find_ffmpeg(sheet_path):
+    return find_tool(sheet_path, "ffmpeg")
+
+
+def audio_seconds(path, ffprobe):
+    try:
+        out = subprocess.run([ffprobe, "-v", "error", "-show_entries", "format=duration",
+                              "-of", "csv=p=0", str(path)],
+                             capture_output=True, text=True, timeout=30)
+        return float(out.stdout.strip())
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
 
 
 def find_deno():
@@ -427,6 +441,29 @@ def export(rows, sheet_path, out_path, chosung, accept_artist=True, category=1,
                 song["time"] = None  # 이미 시작 지점부터 잘라서 받았음
             kept_new.append(song)
         new = kept_new
+
+        # 시작 지점(기본 45초)보다 짧은 곡은 처음부터 자르게 한다
+        ffprobe = find_tool(sheet_path, "ffprobe")
+        if ffprobe and not ffmpeg:
+            for song in new:
+                length = audio_seconds(song["url"], ffprobe)
+                if length is not None and song["_start"] + 10 > length:
+                    print(f"  곡이 짧아서({length:.0f}초) 처음부터 써요: {song['title']}")
+                    song["time"] = None
+
+        # 시트에 원래 있던 오프닝/엔딩 곡도 유튜브 주소면 미리 받아 둔다
+        if "url" in cols:
+            ci = cols["url"] - 1
+            special = [{"url": v[ci], "_start": 0, "_row": v} for v in kept
+                       if isinstance(v[ci], str) and video_id(v[ci])]
+            if special:
+                print(f"  오프닝/엔딩 곡 {len(special)}개도 받아 둘게요.")
+                got_sp = download_songs(special, Path(download_dir), list(cookies), None, window)
+                for n, sp in enumerate(special):
+                    if n in got_sp:
+                        sp["_row"][ci] = str(Path(got_sp[n]).resolve())
+                    else:
+                        print(f"  ! 오프닝/엔딩 곡을 못 받았어요: {sp['url']}")
 
     def put(r, c, v):
         # 예시 곡 링크 칸이 하이퍼링크라서, 값만 바꾸면 옛 주소가 남는다
