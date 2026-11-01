@@ -252,6 +252,39 @@ def find_ffmpeg(sheet_path):
     return shutil.which("ffmpeg")
 
 
+def find_deno():
+    """유튜브 다운로드에 필요한 Deno 찾기. 설치 직후 PATH 에 안 잡혀도 찾게 흔한 위치도 본다."""
+    import os
+    found = shutil.which("deno")
+    if found:
+        return found
+    home = Path(os.environ.get("USERPROFILE") or Path.home())
+    local = Path(os.environ.get("LOCALAPPDATA") or home / "AppData" / "Local")
+    candidates = [home / ".deno" / "bin" / "deno.exe",
+                  local / "Microsoft" / "WinGet" / "Links" / "deno.exe"]
+    candidates += sorted((local / "Microsoft" / "WinGet" / "Packages").glob("DenoLand.Deno*/deno.exe"))
+    for c in candidates:
+        if c.is_file():
+            return str(c)
+    return None
+
+
+def ytdlp_youtube_args():
+    """지금 유튜브는 JS 퍼즐을 풀어야 받을 수 있다 (안 풀면 HTTP 403)."""
+    deno = find_deno()
+    if not deno:
+        sys.exit("\n유튜브에서 받으려면 Deno 가 필요해요 (없으면 HTTP Error 403 으로 다 실패해요).\n"
+                 "  1) 명령 프롬프트에서:  winget install DenoLand.Deno\n"
+                 "  2) 열려 있는 명령 프롬프트 창을 모두 닫고 다시 실행하세요.\n"
+                 "     그래도 안 되면 PC 를 재부팅하세요.")
+    args = ["--js-runtimes", f"deno:{deno}"]
+    try:
+        import yt_dlp_ejs  # noqa: F401  (yt-dlp[default] 로 설치하면 같이 깔림)
+    except ImportError:
+        args += ["--remote-components", "ejs:github"]
+    return args
+
+
 def video_id(url):
     m = re.search(r"(?:[?&]v=|youtu\.be/)([\w-]{11})", url or "")
     return m.group(1) if m else None
@@ -266,6 +299,7 @@ def download_songs(songs, dl_dir, cookies, ffmpeg, window):
     """
     from songquiz import ytdlp
 
+    yt_args = ytdlp_youtube_args()
     dl_dir.mkdir(parents=True, exist_ok=True)
     got, todo = {}, {}
     for n, song in enumerate(songs):
@@ -289,7 +323,7 @@ def download_songs(songs, dl_dir, cookies, ffmpeg, window):
     for start, items in todo.items():
         by_name = {name: n for n, _, name in items}
         cmd = [*ytdlp(), "-f", "bestaudio/best", "--ignore-errors", "--no-playlist",
-               "--no-simulate", "--print", "after_move:%(filepath)s", *cookies,
+               "--no-simulate", "--print", "after_move:%(filepath)s", *yt_args, *cookies,
                "-o", str(dl_dir / ("%(id)s_" + str(start) + ".%(ext)s" if ffmpeg else "%(id)s.%(ext)s"))]
         if ffmpeg:
             cmd += ["--ffmpeg-location", ffmpeg,
