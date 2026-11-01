@@ -9,16 +9,24 @@ if not exist yeongaesomun.py goto nofile
 echo ============================================
 echo  1/2  유튜브 뮤직 '좋아요 표시한 음악' 가져오기
 echo ============================================
+if exist cookies.txt (
+    echo 이 폴더의 cookies.txt 로 로그인해서 가져올게요.
+    set "COOKIE=--cookies cookies.txt"
+    goto doimport
+)
 echo 유튜브에 로그인돼 있는 브라우저를 고르세요.
 echo   1 = 파이어폭스   2 = 크롬   3 = 엣지
+echo   (크롬/엣지는 브라우저를 완전히 끈 상태여야 하고, 그래도 실패할 수 있어요.
+echo    그럴 땐 cookies.txt 를 이 폴더에 넣고 다시 실행하세요.)
 set "B="
 set /p "B=번호 입력 후 Enter (그냥 Enter = 파이어폭스): "
-set "BROWSER=firefox"
-if "%B%"=="2" set "BROWSER=chrome"
-if "%B%"=="3" set "BROWSER=edge"
+set "COOKIE=--cookies-from-browser firefox"
+if "%B%"=="2" set "COOKIE=--cookies-from-browser chrome"
+if "%B%"=="3" set "COOKIE=--cookies-from-browser edge"
 
+:doimport
 if exist playlist.csv move /y playlist.csv playlist.old.csv >nul
-py songquiz.py import liked --cookies-from-browser %BROWSER%
+py songquiz.py import liked %COOKIE%
 if errorlevel 1 goto fail
 
 echo.
