@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 SHEET_NAME = "곡 목록"
+MAX_CHAT_BYTES = 78  # 스타 채팅 한 줄 최대 길이 (euddraft chatEvent 제한)
 
 # (키, 머리글에 들어 있는 글자들) — 앞에서부터 먼저 맞는 것을 쓴다
 COLUMNS = [
@@ -148,6 +149,13 @@ def song_row(row, chosung, accept_artist, category, default_start):
 
     main = squash(title)
     alts = [a for a in dict.fromkeys(squash(a) for a in alts) if a and a != main]
+    # 스타 채팅 한 줄은 78바이트까지라, 더 긴 정답은 chatEvent 빌드 오류가 난다
+    too_long = [a for a in alts if len(a.encode("utf-8")) > MAX_CHAT_BYTES]
+    if too_long:
+        print(f"  ! 너무 긴 복수정답 {len(too_long)}개는 뺐어요: {title}")
+        alts = [a for a in alts if a not in too_long]
+    if len(main.encode("utf-8")) > MAX_CHAT_BYTES:
+        print(f"  ! 정답이 78바이트(한글 약 26자)를 넘어서 채팅으로 칠 수 없어요: {title}")
     start = row.get("start") or default_start
     if accept_artist:
         # 가수도 정답이라 가수 이름을 그대로 보여 주면 안 됨
