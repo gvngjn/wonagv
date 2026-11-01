@@ -68,13 +68,37 @@ def resolve_url(url, artist, title):
 
 
 def difficulty(row, default):
-    v = str(row.get("difficulty") or "").strip()
+    v = str(row.get("difficulty") if row.get("difficulty") is not None else "").strip()
     if not v:
         return default
     try:
         return int(float(v))
     except ValueError:
         return v
+
+
+def rank(rows):
+    """쉬운 곡부터 줄 세운 (원래 번호, 곡) 목록.
+
+    difficulty 숫자가 작을수록 쉬움. 같은 숫자끼리는 원래 순서를 유지하고,
+    비어 있으면 맨 뒤(어려움) 쪽으로 보낸다.
+    """
+    def key(item):
+        i, row = item
+        try:
+            return float(str(row.get("difficulty") if row.get("difficulty") is not None else "").strip()), i
+        except ValueError:
+            return float("inf"), i
+
+    return sorted(enumerate(rows), key=key)
+
+
+def split_part(rows, part, parts):
+    """쉬운 순으로 줄 세워 parts 등분한 것 중 part 번째(1부터). 원래 순서 유지."""
+    ranked = rank(rows)
+    n = len(ranked)
+    picked = {i for pos, (i, _) in enumerate(ranked) if pos * parts // n + 1 == part}
+    return [r for i, r in enumerate(rows) if i in picked]
 
 
 def balance(rows, levels):
@@ -84,14 +108,7 @@ def balance(rows, levels):
     유지한 채 levels 등분한다. 그래서 '1이 2보다 쉽다'는 순서는 지키면서
     1단계에 곡이 몰려 있으면 덜 유명한 쪽부터 2단계로 밀려난다.
     """
-    def key(item):
-        i, row = item
-        try:
-            return float(str(row.get("difficulty") or "").strip()), i
-        except ValueError:
-            return float("inf"), i  # 비어 있으면 맨 뒤(어려움) 쪽
-
-    ranked = sorted(enumerate(rows), key=key)
+    ranked = rank(rows)
     n = len(ranked)
     out = [dict(r) for r in rows]
     for pos, (i, _) in enumerate(ranked):
@@ -154,6 +171,51 @@ def find_sheet(path):
             return found[0]
     sys.exit(f"{path} 근처에서 진짜 sheet.xlsx 를 못 찾았어요. "
              "Worker\\...\\Data\\sheet.xlsx 경로를 직접 넣어 주세요.")
+
+
+def find_build_eds(path):
+    """연개소문 폴더 / Map 폴더 / 시트 경로 중 무엇을 받아도 Map\\build.eds 를 찾는다."""
+    path = Path(path)
+    for base in [path, *path.parents]:
+        for cand in (base / "build.eds", base / "Map" / "build.eds"):
+            if cand.is_file():
+                return cand
+    return None
+
+
+def tag_build_eds(path, part, parts):
+    """맵 이름(map_name)과 출력 파일(output) 뒤에 [1/3] 같은 번호를 붙인다."""
+    eds = find_build_eds(path)
+    if eds is None:
+        print("! build.eds 를 못 찾아서 맵 이름은 그대로예요. 직접 바꿔 주세요.")
+        return
+    raw = eds.read_bytes()
+    for enc in ("utf-8-sig", "cp949"):
+        try:
+            text = raw.decode(enc)
+            break
+        except UnicodeDecodeError:
+            continue
+    else:
+        print("! build.eds 글자 인코딩을 몰라서 맵 이름은 그대로예요.")
+        return
+    tag = f"[{part}/{parts}]"
+    out = []
+    for line in text.splitlines(keepends=True):
+        body = line.rstrip("\r\n")
+        end = line[len(body):]
+        m = re.match(r"(\s*(map_name|output)\s*:\s*)(.*)$", body)
+        if m:
+            value = re.sub(r"\s*\[\d+/\d+\]", "", m.group(3))
+            if m.group(2) == "output" and "." in value:
+                stem, ext = value.rsplit(".", 1)
+                value = f"{stem.rstrip()} {tag}.{ext}"
+            else:
+                value = f"{value.rstrip()} {tag}"
+            body = m.group(1) + value
+        out.append(body + end)
+    eds.write_bytes("".join(out).encode("utf-8" if enc == "utf-8-sig" else enc))
+    print(f"{eds} 의 맵 이름과 출력 파일 이름에 {tag} 를 붙였어요.")
 
 
 def export(rows, sheet_path, out_path, chosung, accept_artist=True, category=1,

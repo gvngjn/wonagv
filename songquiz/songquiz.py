@@ -413,6 +413,14 @@ def cmd_yeongaesomun(args):
     rows = read_playlist()
     if args.limit:
         rows = rows[: args.limit]
+    if args.part:
+        try:
+            part, parts = (int(x) for x in args.part.split("/"))
+            assert 1 <= part <= parts
+        except (ValueError, AssertionError):
+            sys.exit("--part 는 1/3 처럼 '몇 번째/몇 개' 로 넣어 주세요.")
+        rows = yeongaesomun.split_part(rows, part, parts)
+        print(f"맵 {part}/{parts}: 쉬운 순으로 {parts}등분한 것 중 {part}번째, {len(rows)}곡")
     out = Path(args.out) if args.out else sheet
     if out == sheet:
         backup = sheet.with_name(sheet.stem + ".backup.xlsx")
@@ -424,6 +432,8 @@ def cmd_yeongaesomun(args):
                         default_start=args.start,
                         keep_existing=args.keep_existing,
                         levels=0 if args.no_balance else args.levels)
+    if args.part:
+        yeongaesomun.tag_build_eds(args.sheet, part, parts)
     print("\n다음 순서: 엑셀을 닫고 worker.bat 실행 → build.eds 를 euddraft 로 실행")
 
 
@@ -480,6 +490,8 @@ def main():
     p.add_argument("--start", type=float, default=45, help="start 칸이 비었을 때 시작 지점(초)")
     p.add_argument("--limit", type=int, help="앞에서부터 최대 몇 곡")
     p.add_argument("--keep-existing", action="store_true", help="시트에 있던 예시 곡도 남기기")
+    p.add_argument("--part", metavar="N/M",
+                   help="곡이 많을 때 맵 나누기. 쉬운 순으로 M등분한 것 중 N번째만 넣음 (예: 1/3)")
     p.add_argument("--levels", type=int, default=4, help="난이도 단계 수 (연개소문 기본 4, 최대 7)")
     p.add_argument("--no-balance", action="store_true",
                    help="difficulty 칸 값을 그대로 쓰기 (기본: 단계마다 곡 수가 같게 다시 나눔)")

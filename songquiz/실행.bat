@@ -44,11 +44,23 @@ echo.
 echo ============================================
 echo  2/2  연개소문 시트에 넣기
 echo ============================================
+echo 곡이 많으면 쉬운 곡/어려운 곡으로 맵을 나눌 수 있어요.
+echo 맵마다 연개소문 폴더를 따로 하나씩 복사해 두고, 이 파일을 맵 수만큼 실행하세요.
+set "M="
+set /p "M=맵을 몇 개로 나눌까요? (예: 3 / 그냥 Enter = 안 나눔): "
+set "PART="
+if not defined M goto askfolder
+set "N="
+set /p "N=이번에 만들 건 몇 번째 맵인가요? (1 = 가장 쉬운 맵): "
+if not defined N goto fail
+set "PART=--part %N%/%M%"
+
+:askfolder
 echo 연개소문 폴더를 이 창으로 끌어다 놓고 Enter 를 누르세요.
 set "Y="
 set /p "Y=연개소문 폴더: "
 if not defined Y goto fail
-py songquiz.py yeongaesomun %Y%
+py songquiz.py yeongaesomun %Y% %PART%
 if errorlevel 1 goto fail
 
 echo.
