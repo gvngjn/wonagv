@@ -1,5 +1,8 @@
 name: 초록불 알리미 배포
 
+# green-light/ 를 테스트한 뒤 gh-pages 브랜치의 green-light/ 폴더에 올린다.
+# gh-pages 루트의 다른 앱(런루프)은 건드리지 않는다.
+# 주소: https://<사용자>.github.io/<저장소>/green-light/
 on:
   push:
     paths:
@@ -8,12 +11,14 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
 
 jobs:
-  test:
+  deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,18 +27,26 @@ jobs:
           node-version: "22"
       - name: 감지 로직 테스트
         run: node --test green-light/detector.test.js
-
-  deploy:
-    needs: test
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: green-light
-      - id: deployment
-        uses: actions/deploy-pages@v4
+      - name: gh-pages/green-light 에 올리기
+        run: |
+          set -e
+          site="$RUNNER_TEMP/site"
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          url="https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git"
+          if git ls-remote --exit-code --heads "$url" gh-pages >/dev/null; then
+            git clone -q --depth 1 --branch gh-pages "$url" "$site"
+          else
+            mkdir -p "$site" && cd "$site" && git init -q -b gh-pages && git remote add origin "$url" && cd -
+          fi
+          rm -rf "$site/green-light"
+          mkdir -p "$site/green-light"
+          cp green-light/index.html green-light/detector.js "$site/green-light/"
+          touch "$site/.nojekyll"
+          cd "$site"
+          git add -A
+          if git diff --cached --quiet; then echo "변경 없음"; exit 0; fi
+          git commit -q -m "초록불 알리미 배포: ${GITHUB_SHA::7}"
+          git push -q origin gh-pages
+      - name: 주소 안내
+        run: echo "배포 주소 https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}/green-light/" >> "$GITHUB_STEP_SUMMARY"

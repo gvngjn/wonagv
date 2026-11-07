@@ -23,12 +23,14 @@
 - 초록불만 보이는 경우(이미 초록인 교차로 통과)는 울리지 않음
 
 ## 열기 (https 필요)
-카메라는 https 주소에서만 켜집니다. 이 저장소에는 GitHub Pages 배포 워크플로가 들어 있어요.
-1. GitHub 저장소 → **Settings → Pages → Build and deployment → Source: GitHub Actions**
-2. `green-light/` 변경이 push되면 "초록불 알리미 배포" 워크플로가 실행되고
-   `https://<사용자명>.github.io/<저장소>/` 주소가 생깁니다. 휴대폰에서 열고 **홈 화면에 추가**하면 앱처럼 쓸 수 있어요.
+카메라는 https 주소에서만 켜집니다. `green-light/`가 바뀌어 push되면 "초록불 알리미 배포" 워크플로가
+`gh-pages` 브랜치의 `green-light/` 폴더에 올립니다 (루트의 다른 앱은 그대로 둠).
 
-> 비공개 저장소의 Pages는 유료 플랜에서만 지원됩니다. 이 경우 `green-light/` 폴더를 Netlify Drop 등에 올려도 됩니다.
+- 주소: **https://gvngjn.github.io/wonagv/green-light/**
+- Settings → Pages 가 "Deploy from a branch · gh-pages · / (root)" 로 되어 있어야 합니다 (런루프와 같은 설정).
+- 런루프 배포는 gh-pages를 통째로 덮어써서 이 폴더가 지워집니다. 그때는 Actions → "초록불 알리미 배포" → **Run workflow** 로 다시 올리세요.
+
+휴대폰에서 주소를 열고 **홈 화면에 추가**하면 앱처럼 쓸 수 있어요.
 
 PC에서 테스트: `cd green-light && python3 -m http.server` → `http://localhost:8000` (localhost는 http도 허용)
 
