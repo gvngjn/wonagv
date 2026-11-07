@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#000000">
+<title>초록불 알리미</title>
+<style>
+  :root { --bg:#000; --fg:#f5f5f5; --muted:#9a9a9a; --red:#ff4a3d; --green:#21e08a; --panel:rgba(20,20,20,.82); }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic",sans-serif; }
+  #stage { position:fixed; inset:0; overflow:hidden; touch-action:none; }
+  video, #overlay { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+  #overlay { z-index:1; }
+  #flash { position:absolute; inset:0; z-index:2; background:var(--green); opacity:0; pointer-events:none; transition:opacity .6s; }
+  #flash.on { opacity:.75; transition:none; }
+  .panel { position:absolute; left:12px; right:12px; z-index:3; background:var(--panel);
+    border-radius:14px; padding:12px 14px; backdrop-filter:blur(6px); }
+  #top { top:calc(env(safe-area-inset-top) + 12px); display:flex; align-items:center; gap:12px; }
+  #lamp { width:34px; height:34px; border-radius:50%; background:#333; flex:none; box-shadow:0 0 0 2px #555 inset; }
+  #lamp.red { background:var(--red); box-shadow:0 0 18px var(--red); }
+  #lamp.green { background:var(--green); box-shadow:0 0 18px var(--green); }
+  #status { font-size:18px; font-weight:700; }
+  #sub { font-size:13px; color:var(--muted); margin-top:2px; }
+  .bars { margin-left:auto; display:flex; gap:4px; align-items:flex-end; height:34px; }
+  .bar { width:8px; background:#333; border-radius:3px; position:relative; height:100%; overflow:hidden; }
+  .bar i { position:absolute; left:0; right:0; bottom:0; height:0; }
+  #barR i { background:var(--red); } #barG i { background:var(--green); }
+  #bottom { bottom:calc(env(safe-area-inset-bottom) + 12px); }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  button { font:inherit; font-size:15px; border:0; border-radius:10px; padding:10px 14px; background:#2c2c2c; color:var(--fg); }
+  button.primary { background:var(--green); color:#032; font-weight:700; flex:1; font-size:17px; padding:14px; }
+  button.primary.stop { background:#444; color:var(--fg); }
+  label { font-size:13px; color:var(--muted); display:flex; align-items:center; gap:8px; }
+  input[type=range] { flex:1; }
+  .hint { font-size:12px; color:var(--muted); margin:8px 0 0; line-height:1.45; }
+  #settings { margin-top:10px; display:none; }
+  #settings.open { display:block; }
+  #settings .row { margin-top:8px; }
+  #intro { position:absolute; inset:0; z-index:5; background:#000; display:flex; flex-direction:column;
+    justify-content:center; padding:28px 24px; gap:14px; }
+  #intro h1 { margin:0; font-size:26px; }
+  #intro p { margin:0; color:#cfcfcf; line-height:1.55; font-size:15px; }
+  #intro .warn { color:#ffcf6a; font-size:13px; }
+  #intro.hidden { display:none; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <video id="video" playsinline muted autoplay></video>
+  <canvas id="overlay"></canvas>
+  <div id="flash"></div>
+
+  <div id="top" class="panel">
+    <div id="lamp"></div>
+    <div>
+      <div id="status">대기</div>
+      <div id="sub">시작을 누르세요</div>
+    </div>
+    <div class="bars"><div class="bar" id="barR"><i></i></div><div class="bar" id="barG"><i></i></div></div>
+  </div>
+
+  <div id="bottom" class="panel">
+    <div class="row">
+      <button id="startBtn" class="primary">시작</button>
+      <button id="testBtn">🔊 소리</button>
+      <button id="setBtn">⚙︎</button>
+    </div>
+    <div id="settings">
+      <div class="row"><label style="flex:1">감도 <input id="sens" type="range" min="1" max="10" value="5"></label></div>
+      <div class="row">
+        <label><input id="voice" type="checkbox" checked> 음성 안내</label>
+        <label><input id="mask" type="checkbox" checked> 감지된 색 표시</label>
+        <button id="roiReset">영역 초기화</button>
+      </div>
+      <p class="hint">화면을 손가락으로 드래그해 <b>신호등이 보이는 영역</b>만 박스로 지정하면 오작동이 크게 줄어요.
+        브레이크등·간판이 박스에 들어가지 않게 위쪽으로 좁게 잡으세요.</p>
+    </div>
+  </div>
+
+  <div id="intro">
+    <h1>🚦 초록불 알리미</h1>
+    <p>휴대폰을 대시보드(앞유리 거치대)에 놓고 후면 카메라가 신호등을 향하게 하세요.
+      <b>빨간불에서 정차해 기다리다 초록불로 바뀌면</b> 소리와 음성으로 알려 드립니다.</p>
+    <p>화면을 드래그해 신호등이 보이는 부분만 박스로 지정하면 정확도가 올라가요.</p>
+    <p class="warn">⚠️ 보조 장치일 뿐입니다. 출발 전 반드시 직접 신호와 전방·보행자를 확인하세요.
+      운전 중 휴대폰 조작은 하지 마세요.</p>
+    <button id="introBtn" class="primary">카메라 켜고 시작</button>
+  </div>
+</div>
+
+<script src="detector.js"></script>
+<script>
+(() => {
+  'use strict';
+  const { analyzePixels, classifyPixel, GreenLightDetector } = window.GreenLight;
+  const $ = (id) => document.getElementById(id);
+  const video = $('video'), overlay = $('overlay'), octx = overlay.getContext('2d');
+  const work = document.createElement('canvas'), wctx = work.getContext('2d', { willReadFrequently: true });
+  const PROC_W = 320;                      // 분석용 축소 해상도 (가로)
+  const LS = (k, v) => { try { return v === undefined ? localStorage.getItem(k) : localStorage.setItem(k, v); } catch { return null; } };
+
+  // ── 설정 ──────────────────────────────
+  const DEFAULT_ROI = { x: 0.15, y: 0.13, w: 0.7, h: 0.35 };   // 화면 기준 비율
+  let roi = (() => { try { return JSON.parse(LS('gl.roi')) || DEFAULT_ROI; } catch { return DEFAULT_ROI; } })();
+  const sens = $('sens'), voiceChk = $('voice'), maskChk = $('mask');
+  sens.value = LS('gl.sens') || 5;
+  voiceChk.checked = LS('gl.voice') !== '0';
+  maskChk.checked = LS('gl.mask') !== '0';
+  const minRatioFor = (s) => 0.012 / Math.pow(1.35, s - 1);   // 감도 1: 1.2% … 10: 약 0.08%
+  const detector = new GreenLightDetector({ minRatio: minRatioFor(+sens.value) });
+  sens.oninput = () => { detector.opts.minRatio = minRatioFor(+sens.value); LS('gl.sens', sens.value); };
+  voiceChk.onchange = () => LS('gl.voice', voiceChk.checked ? '1' : '0');
+  maskChk.onchange = () => LS('gl.mask', maskChk.checked ? '1' : '0');
+  $('setBtn').onclick = () => $('settings').classList.toggle('open');
+  $('roiReset').onclick = () => { roi = { ...DEFAULT_ROI }; LS('gl.roi', JSON.stringify(roi)); };
+
+  // ── 소리 ──────────────────────────────
+  let audio = null;
+  function unlockAudio() {
+    if (!audio) audio = new (window.AudioContext || window.webkitAudioContext)();
+    if (audio.state === 'suspended') audio.resume();
+    // iOS: 사용자 터치 안에서 한 번 말해 둬야 이후 음성이 나옴
+    if ('speechSynthesis' in window) speechSynthesis.speak(new SpeechSynthesisUtterance(''));
+  }
+  function tone(freq, start, dur, vol = 0.6) {
+    const o = audio.createOscillator(), g = audio.createGain();
+    o.type = 'sine'; o.frequency.value = freq;
+    g.gain.setValueAtTime(0, start);
+    g.gain.linearRampToValueAtTime(vol, start + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.001, start + dur);
+    o.connect(g).connect(audio.destination);
+    o.start(start); o.stop(start + dur + 0.05);
+  }
+  function chime() {
+    if (!audio) unlockAudio();
+    const t = audio.currentTime + 0.02;
+    tone(880, t, 0.35); tone(1175, t + 0.18, 0.5); tone(1568, t + 0.36, 0.7);
+    if (voiceChk.checked && 'speechSynthesis' in window) {
+      setTimeout(() => {
+        const u = new SpeechSynthesisUtterance('초록불입니다');
+        u.lang = 'ko-KR'; u.rate = 1.05; u.volume = 1;
+        speechSynthesis.cancel(); speechSynthesis.speak(u);
+      }, 900);
+    }
+    if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+    $('flash').classList.add('on');
+    setTimeout(() => $('flash').classList.remove('on'), 120);
+  }
+  $('testBtn').onclick = () => { unlockAudio(); chime(); };
+
+  // ── 화면 꺼짐 방지 ────────────────────
+  let wakeLock = null;
+  async function keepAwake() {
+    try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch {}
+  }
+  document.addEventListener('visibilitychange', () => { if (running && document.visibilityState === 'visible') keepAwake(); });
+
+  // ── 카메라 ────────────────────────────
+  let stream = null, running = false, timer = null;
+  async function start() {
+    unlockAudio();
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+      });
+    } catch (e) {
+      setStatus(null, '카메라를 열 수 없어요', location.protocol === 'https:' || location.hostname === 'localhost'
+        ? '브라우저 설정에서 카메라 권한을 허용해 주세요' : 'https 주소로 열어야 카메라가 동작해요');
+      return;
+    }
+    video.srcObject = stream;
+    await video.play().catch(() => {});
+    running = true; detector.reset(); keepAwake();
+    $('startBtn').textContent = '정지'; $('startBtn').classList.add('stop');
+    $('intro').classList.add('hidden');
+    loop();
+  }
+  function stop() {
+    running = false; clearTimeout(timer);
+    if (stream) stream.getTracks().forEach((t) => t.stop());
+    stream = null; video.srcObject = null;
+    if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
+    $('startBtn').textContent = '시작'; $('startBtn').classList.remove('stop');
+    setStatus(null, '대기', '시작을 누르세요'); octx.clearRect(0, 0, overlay.width, overlay.height);
+  }
+  $('startBtn').onclick = () => (running ? stop() : start());
+  $('introBtn').onclick = start;
+
+  // object-fit: cover 로 잘린 화면 좌표 ↔ 영상 좌표 변환
+  function coverMap() {
+    const vw = video.videoWidth, vh = video.videoHeight, cw = overlay.clientWidth, ch = overlay.clientHeight;
+    const scale = Math.max(cw / vw, ch / vh);
+    return { scale, ox: (cw - vw * scale) / 2, oy: (ch - vh * scale) / 2, vw, vh, cw, ch };
+  }
+
+  // ── 분석 루프 (약 10fps) ───────────────
+  function loop() {
+    if (!running) return;
+    timer = setTimeout(loop, 100);
+    if (!video.videoWidth) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    if (overlay.width !== overlay.clientWidth * dpr) {
+      overlay.width = overlay.clientWidth * dpr; overlay.height = overlay.clientHeight * dpr;
+    }
+    const m = coverMap();
+    // 화면상의 ROI → 영상 좌표
+    const sx = Math.max(0, (roi.x * m.cw - m.ox) / m.scale), sy = Math.max(0, (roi.y * m.ch - m.oy) / m.scale);
+    const sw = Math.min(m.vw - sx, roi.w * m.cw / m.scale), sh = Math.min(m.vh - sy, roi.h * m.ch / m.scale);
+    if (sw < 4 || sh < 4) return;
+
+    const k = PROC_W / m.vw;
+    const pw = Math.max(4, Math.round(sw * k)), ph = Math.max(4, Math.round(sh * k));
+    if (work.width !== pw || work.height !== ph) { work.width = pw; work.height = ph; }
+    wctx.drawImage(video, sx, sy, sw, sh, 0, 0, pw, ph);
+    const img = wctx.getImageData(0, 0, pw, ph);
+    const ratios = analyzePixels(img.data);
+
+    const ev = detector.update(ratios, performance.now());
+    if (ev === 'GREEN') chime();
+    render(ratios, img, pw, ph, dpr);
+  }
+
+  function render(ratios, img, pw, ph, dpr) {
+    const W = overlay.width, H = overlay.height;
+    octx.clearRect(0, 0, W, H);
+    const rx = roi.x * W, ry = roi.y * H, rw = roi.w * W, rh = roi.h * H;
+    // ROI 바깥을 어둡게
+    octx.fillStyle = 'rgba(0,0,0,.45)';
+    octx.fillRect(0, 0, W, ry); octx.fillRect(0, ry + rh, W, H - ry - rh);
+    octx.fillRect(0, ry, rx, rh); octx.fillRect(rx + rw, ry, W - rx - rw, rh);
+    if (maskChk.checked) {
+      const cx = rw / pw, cy = rh / ph, d = img.data;
+      for (let y = 0; y < ph; y++) for (let x = 0; x < pw; x++) {
+        const i = (y * pw + x) * 4, c = classifyPixel(d[i], d[i + 1], d[i + 2]);
+        if (!c) continue;
+        octx.fillStyle = c === 'red' ? 'rgba(255,60,50,.85)' : 'rgba(30,255,150,.85)';
+        octx.fillRect(rx + x * cx, ry + y * cy, Math.ceil(cx), Math.ceil(cy));
+      }
+    }
+    const st = detector.state;
+    octx.lineWidth = 3 * dpr;
+    octx.strokeStyle = st === 'armed' ? '#ff4a3d' : st === 'cooldown' ? '#21e08a' : 'rgba(255,255,255,.8)';
+    octx.strokeRect(rx, ry, rw, rh);
+
+    const t = detector.opts.minRatio * 4;
+    $('barR').firstElementChild.style.height = Math.min(100, ratios.red / t * 100) + '%';
+    $('barG').firstElementChild.style.height = Math.min(100, ratios.green / t * 100) + '%';
+
+    const color = detector.colorOf(ratios);
+    if (st === 'armed') setStatus('red', '빨간불 대기 중', '초록불이 되면 알려 드려요');
+    else if (st === 'cooldown') setStatus('green', '초록불!', '출발 전 주변을 확인하세요');
+    else if (st === 'red') setStatus('red', '빨간불 감지', '정차 확인 중…');
+    else if (color === 'green') setStatus('green', '초록불 보임', '빨간불부터 기다려야 알림이 울려요');
+    else setStatus(null, '신호등 찾는 중', '박스 안에 신호등이 들어오게 해 주세요');
+  }
+
+  let lastStatus = '';
+  function setStatus(lamp, title, sub) {
+    const key = lamp + title + sub; if (key === lastStatus) return; lastStatus = key;
+    $('lamp').className = lamp || ''; $('status').textContent = title; $('sub').textContent = sub;
+  }
+
+  // ── 드래그로 감지 영역 지정 ─────────────
+  let drag = null;
+  overlay.addEventListener('pointerdown', (e) => {
+    const r = overlay.getBoundingClientRect();
+    drag = { x0: (e.clientX - r.left) / r.width, y0: (e.clientY - r.top) / r.height };
+    overlay.setPointerCapture(e.pointerId);
+  });
+  overlay.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    const r = overlay.getBoundingClientRect();
+    const x = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+    const y = Math.min(1, Math.max(0, (e.clientY - r.top) / r.height));
+    const w = Math.abs(x - drag.x0), h = Math.abs(y - drag.y0);
+    if (w > 0.04 && h > 0.03) roi = { x: Math.min(x, drag.x0), y: Math.min(y, drag.y0), w, h };
+  });
+  const endDrag = () => { if (drag) { drag = null; LS('gl.roi', JSON.stringify(roi)); detector.reset(); } };
+  overlay.addEventListener('pointerup', endDrag);
+  overlay.addEventListener('pointercancel', endDrag);
+})();
+</script>
+</body>
+</html>

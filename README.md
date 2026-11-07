@@ -6,6 +6,7 @@
 |---|---|
 | [`windows/`](windows/) | **Windows 앱 (C# / WPF, .NET 8)** — 현재 주력 |
 | [`ios/`](ios/) | iPhone 앱 초기 버전 (SwiftUI, Mac + Xcode 필요) |
+| [`green-light/`](green-light/) | 🚦 **초록불 알리미** — 운전 중 빨간불→초록불이 되면 소리로 알려 주는 휴대폰 웹앱 |
 
 ## 기능
 - 3일치 시간별 날씨 조회 ([Open-Meteo](https://open-meteo.com), API 키 불필요)
